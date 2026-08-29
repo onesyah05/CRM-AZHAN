@@ -1,12 +1,12 @@
 import type { MessageStatus, WhatsAppStatus } from '@azhan-crm/contracts';
 import type { IncomingWhatsAppMessage, WhatsAppGateway } from './gateway.js';
 
-export class DemoWhatsAppGateway implements WhatsAppGateway {
+export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
   private status: WhatsAppStatus = {
     status: 'connected',
     phone: '+62812••••778',
     lastConnectedAt: new Date().toISOString(),
-    message: 'Nomor demo terhubung',
+    message: 'Nomor fixture terhubung',
     developmentStorage: true,
   };
 
@@ -18,7 +18,7 @@ export class DemoWhatsAppGateway implements WhatsAppGateway {
       status: 'connected',
       phone: '+62812••••778',
       lastConnectedAt: new Date().toISOString(),
-      message: 'Nomor demo terhubung',
+      message: 'Nomor fixture terhubung',
       developmentStorage: true,
     };
   }
@@ -26,17 +26,17 @@ export class DemoWhatsAppGateway implements WhatsAppGateway {
   async disconnect(): Promise<void> {
     this.status = {
       status: 'disconnected',
-      message: 'Nomor demo diputuskan',
+      message: 'Nomor fixture diputuskan',
       developmentStorage: true,
     };
   }
 
   async sendText(input: { messageId?: string }): Promise<{ messageId: string }> {
-    return { messageId: input.messageId ?? `demo-wa-${crypto.randomUUID()}` };
+    return { messageId: input.messageId ?? `fixture-wa-${crypto.randomUUID()}` };
   }
 
   async sendMedia(input: { messageId?: string }): Promise<{ messageId: string }> {
-	return { messageId: input.messageId ?? `demo-wa-${crypto.randomUUID()}` };
+	return { messageId: input.messageId ?? `fixture-wa-${crypto.randomUUID()}` };
   }
 
   getStatus(): WhatsAppStatus {

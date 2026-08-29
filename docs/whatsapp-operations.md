@@ -2,7 +2,7 @@
 
 ## Development
 
-Atur `DEMO_MODE=false`. Untuk eksperimen lokal saja, `WA_AUTH_DRIVER=filesystem` dapat memakai `WA_AUTH_PATH=.data/wa-auth`. Buka **Pengaturan → Koneksi WhatsApp**, tampilkan QR, lalu pindai melalui menu Perangkat Tertaut pada WhatsApp.
+Untuk eksperimen lokal saja, `WA_AUTH_DRIVER=filesystem` dapat memakai `WA_AUTH_PATH=.data/wa-auth`. Buka **Pengaturan → Koneksi WhatsApp**, tampilkan QR, lalu pindai melalui menu Perangkat Tertaut pada WhatsApp.
 
 Adapter hanya memproses chat personal. Group, status, dan newsletter diabaikan. Broadcast massal tidak disediakan.
 

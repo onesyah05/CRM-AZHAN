@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { DemoStore } from './demo-store.js';
+import { TestFixtureStore } from './test-fixture-store.js';
 
-describe('DemoStore tenant scope', () => {
+describe('TestFixtureStore tenant scope', () => {
   it('does not return a lead through another brand scope', () => {
-    const store = new DemoStore();
+    const store = new TestFixtureStore();
     expect(store.getLead(2, 'lead-1')).toBeNull();
     expect(store.updateLead(2, 'lead-1', { name: 'Tidak boleh' })).toBeNull();
   });
 
   it('requires the Deal flow for the Deal stage', () => {
-    const store = new DemoStore();
+    const store = new TestFixtureStore();
     expect(() => store.moveLead(1, 'lead-1', 'deal', 'Tester')).toThrow('DEAL_FLOW_REQUIRED');
   });
 
   it('returns the same Deal result for the same idempotency key', () => {
-    const store = new DemoStore();
+    const store = new TestFixtureStore();
     const request = {
       scheduleId: 101,
       roomType: 'Quad' as const,

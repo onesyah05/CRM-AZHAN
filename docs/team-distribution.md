@@ -36,4 +36,4 @@ Semua endpoint tim memerlukan session Manager/Super Admin dan brand context terv
 
 ## Verifikasi
 
-Unit test memeriksa urutan round-robin dan perilaku skip saat kuota habis. Integration test membuat 100 lead pada database test terisolasi dan memverifikasi hitungan akhir 10/40/30/20. E2E demo memeriksa halaman Tim CS, total 100%, perubahan pembagian, dan leaderboard.
+Unit test memeriksa urutan round-robin dan perilaku skip saat kuota habis. Integration test membuat 100 lead pada database test terisolasi dan memverifikasi hitungan akhir 10/40/30/20. E2E fixture memeriksa halaman Tim CS, total 100%, perubahan pembagian, dan leaderboard.

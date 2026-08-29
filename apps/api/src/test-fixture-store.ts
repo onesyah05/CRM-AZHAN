@@ -155,16 +155,16 @@ const baseActivities: Activity[] = [
   { id: 'act-3', type: 'deal', title: 'Maya berhasil Book Seat', description: 'Booking ERP #9011 terhubung.', actor: 'Aulia', occurredAt: isoAgo(780), leadId: 'lead-7' },
 ];
 
-export class DemoStore {
+export class TestFixtureStore {
   private readonly leads = structuredClone(baseLeads);
   private readonly conversations = structuredClone(baseConversations);
   private readonly messages = structuredClone(baseMessages);
   private readonly activities = structuredClone(baseActivities);
   private readonly conversions = new Map<string, DealResult>();
   private readonly teamMembers: TeamMember[] = [
-    { userId: 11, brandId: 1, email: 'aulia@demo.test', displayName: 'Aulia', allocationPercent: 40, allocatedInCycle: 3, rotationPosition: 1, isActive: true },
-    { userId: 12, brandId: 1, email: 'fikri@demo.test', displayName: 'Fikri', allocationPercent: 30, allocatedInCycle: 2, rotationPosition: 2, isActive: true },
-    { userId: 13, brandId: 1, email: 'salma@demo.test', displayName: 'Salma', allocationPercent: 30, allocatedInCycle: 2, rotationPosition: 3, isActive: true },
+    { userId: 11, brandId: 1, email: 'aulia@fixture.test', displayName: 'Aulia', allocationPercent: 40, allocatedInCycle: 3, rotationPosition: 1, isActive: true },
+    { userId: 12, brandId: 1, email: 'fikri@fixture.test', displayName: 'Fikri', allocationPercent: 30, allocatedInCycle: 2, rotationPosition: 2, isActive: true },
+    { userId: 13, brandId: 1, email: 'salma@fixture.test', displayName: 'Salma', allocationPercent: 30, allocatedInCycle: 2, rotationPosition: 3, isActive: true },
   ];
 
   listStages(_brandId?: number): Stage[] {
@@ -461,10 +461,10 @@ export class DemoStore {
       conversionId: `conversion-${crypto.randomUUID()}`,
       status: 'completed',
       message: request.commitmentType === 'book_seat'
-        ? 'Booking demo dibuat dan seat berhasil ditahan.'
+        ? 'Booking fixture dibuat dan seat berhasil ditahan.'
         : request.commitmentType === 'dp'
-          ? 'Booking demo dibuat. DP menunggu verifikasi.'
-          : 'Booking demo dan pembayaran lunas berhasil dicatat.',
+          ? 'Booking fixture dibuat. DP menunggu verifikasi.'
+          : 'Booking fixture dan pembayaran lunas berhasil dicatat.',
     };
     this.conversions.set(`${brandId}:${leadId}:${idempotencyKey}`, result);
     this.activities.unshift({
@@ -472,7 +472,7 @@ export class DemoStore {
       type: 'deal',
       title: `${updated.name} berhasil diproses sebagai Deal`,
       description: result.message,
-      actor: 'Admin Demo',
+      actor: 'Admin Test',
       occurredAt: new Date().toISOString(),
       leadId,
     });

@@ -14,11 +14,11 @@ import { z } from 'zod';
 import type { ApiErrorShape, Lead, UserContext } from '@azhan-crm/contracts';
 import { createDatabasePool, DealConflictError, DistributionValidationError, MySqlCrmStore, VersionConflictError, type Pool } from '@azhan-crm/database';
 import { config } from './config.js';
-import { DemoStore } from './demo-store.js';
+import { TestFixtureStore } from './test-fixture-store.js';
 import { EncryptedMysqlSessionStore } from './encrypted-session-store.js';
 import { ErpGateway, ErpGatewayError } from './erp/gateway.js';
 import { BaileysWhatsAppGateway } from './whatsapp/baileys-gateway.js';
-import { DemoWhatsAppGateway } from './whatsapp/demo-gateway.js';
+import { TestFixtureWhatsAppGateway } from './whatsapp/test-fixture-gateway.js';
 import type { WhatsAppGateway } from './whatsapp/gateway.js';
 
 const logger = pino({
@@ -26,10 +26,10 @@ const logger = pino({
   redact: ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.accessToken', '*.refreshToken', '*.qrDataUrl'],
 });
 const databasePool: Pool | null = config.testFixtures ? null : createDatabasePool(config.databaseUrl!);
-let store: DemoStore | MySqlCrmStore = config.testFixtures ? new DemoStore() : new MySqlCrmStore(databasePool!);
+let store: TestFixtureStore | MySqlCrmStore = config.testFixtures ? new TestFixtureStore() : new MySqlCrmStore(databasePool!);
 const erp = new ErpGateway(config.erpApiBaseUrl);
 const whatsapp: WhatsAppGateway = config.testFixtures
-  ? new DemoWhatsAppGateway()
+  ? new TestFixtureWhatsAppGateway()
   : new BaileysWhatsAppGateway(
 	config.waAuthPath,
 	config.waAuthDriver,
@@ -337,7 +337,7 @@ app.post('/api/v1/test/reset', (_request, response) => {
     sendError(response, 404, 'NOT_FOUND', 'Endpoint tidak ditemukan.');
     return;
   }
-  store = new DemoStore();
+  store = new TestFixtureStore();
   response.status(204).end();
 });
 
@@ -547,7 +547,7 @@ app.get('/api/v1/team/performance', requireBrand, requireManager, async (request
 app.get('/api/v1/stages', requireBrand, async (request, response) => response.json(await store.listStages(brandId(request))));
 app.get('/api/v1/schedules', requireBrand, async (request, response) => {
   if (config.testFixtures) {
-    response.json((store as DemoStore).listSchedules());
+    response.json((store as TestFixtureStore).listSchedules());
     return;
   }
   try {
@@ -703,7 +703,7 @@ app.post('/api/v1/leads/:id/deal', requireBrand, mutationLimiter, async (request
 	  ...(parsed.data.paymentProofUrl ? { paymentProofUrl: parsed.data.paymentProofUrl } : {}),
     };
     if (config.testFixtures) {
-      const result = (store as DemoStore).processDeal(brandId(request), String(request.params.id), dealRequest, idempotencyKey);
+      const result = (store as TestFixtureStore).processDeal(brandId(request), String(request.params.id), dealRequest, idempotencyKey);
       if (!result) return sendError(response, 404, 'LEAD_NOT_FOUND', 'Lead tidak ditemukan.');
       return response.json(result);
     }

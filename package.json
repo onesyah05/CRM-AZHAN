@@ -1,0 +1,32 @@
+{
+  "name": "azhan-crm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,blue \"npm run dev -w @azhan-crm/api\" \"npm run dev -w @azhan-crm/web\"",
+    "dev:api": "npm run dev -w @azhan-crm/api",
+    "dev:web": "npm run dev -w @azhan-crm/web",
+    "build": "npm run build -w @azhan-crm/contracts && npm run build -w @azhan-crm/database && npm run build -w @azhan-crm/api && npm run build -w @azhan-crm/web",
+    "typecheck": "npm run build -w @azhan-crm/contracts && npm run build -w @azhan-crm/database && npm run typecheck -w @azhan-crm/api && npm run typecheck -w @azhan-crm/web",
+    "lint": "oxlint apps packages",
+    "test": "npm run test --workspaces --if-present",
+    "test:integration": "npm run build -w @azhan-crm/contracts && npm run build -w @azhan-crm/database && npm run test:integration -w @azhan-crm/database && npm run test:integration -w @azhan-crm/api",
+    "test:e2e": "npm run build -w @azhan-crm/contracts && npm run build -w @azhan-crm/database && npm run build -w @azhan-crm/api && npm run test:e2e -w @azhan-crm/web",
+    "db:migrate": "tsx packages/database/src/migrate.ts",
+    "db:seed": "tsx packages/database/src/seed.ts"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.4",
+    "oxlint": "1.75.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

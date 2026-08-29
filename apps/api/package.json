@@ -1,0 +1,39 @@
+{
+  "name": "@azhan-crm/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --exclude **/*.integration.test.ts --pool=threads --maxWorkers=1",
+    "test:integration": "vitest run src/encrypted-session-store.integration.test.ts src/socket-auth.integration.test.ts --pool=threads --maxWorkers=1"
+  },
+  "dependencies": {
+    "@azhan-crm/contracts": "*",
+    "@azhan-crm/database": "*",
+    "@whiskeysockets/baileys": "6.7.24",
+    "cors": "2.8.5",
+    "express": "5.1.0",
+    "express-rate-limit": "8.7.0",
+    "express-session": "1.18.2",
+    "helmet": "8.1.0",
+    "pino": "9.9.4",
+    "qrcode": "1.5.4",
+    "socket.io": "4.8.3",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.3",
+    "@types/express-session": "1.18.2",
+    "@types/node": "24.3.0",
+    "@types/qrcode": "1.5.5",
+    "socket.io-client": "^4.8.3",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.7"
+  }
+}

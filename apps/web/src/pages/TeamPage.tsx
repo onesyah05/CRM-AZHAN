@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Eye, EyeOff, KeyRound, Medal, Plus, Save, UserCheck, UserMinus, UsersRound, X } from 'lucide-react';
 import type { DashboardPeriod } from '@azhan-crm/contracts';
 import { api, ApiClientError } from '../api';
-import { Avatar, Dialog, ErrorState, LoadingState, PageHeader } from '../components/ui';
+import { Avatar, Dialog, ErrorState, LoadingState } from '../components/ui';
 import { formatCompactCurrency } from '../utils';
 
 export function TeamPage() {
@@ -76,12 +76,10 @@ export function TeamPage() {
 
   return (
     <div className="page team-page">
-      <PageHeader
-        eyebrow="ADMIN CRM"
-        title="Tim CS & Distribusi Lead"
-        description="Kelola akun, pembagian lead, dan performa closing setiap CS."
-        actions={<button className="button button--primary" onClick={() => setShowCreate((value) => !value)}>{showCreate ? <X size={17} /> : <Plus size={17} />}{showCreate ? 'Tutup form' : 'Tambah akun CS'}</button>}
-      />
+      <header className="team-page-header">
+        <div><span className="eyebrow">Admin CRM</span><h1>Tim CS dan distribusi lead</h1><p>Atur kapasitas tim, pembagian lead baru, dan lihat kontribusi setiap CS.</p></div>
+        <button className="button button--primary" onClick={() => setShowCreate((value) => !value)}>{showCreate ? <X size={17} /> : <Plus size={17} />}{showCreate ? 'Tutup form' : 'Tambah akun CS'}</button>
+      </header>
 
       {showCreate ? (
         <form className="panel team-create-form" onSubmit={(event) => { event.preventDefault(); if (createPasswordMatches) create.mutate(); }}>
@@ -97,31 +95,37 @@ export function TeamPage() {
       {successNotice ? <div className="inline-success" role="status">{successNotice}</div> : null}
       {mutationError ? <div className="inline-error" role="alert">{mutationError instanceof ApiClientError ? mutationError.message : 'Perubahan belum berhasil disimpan.'}</div> : null}
 
-      <section className="panel team-distribution-card">
-        <header className="panel__header"><div><h2>Rotasi jatah lead</h2><p>Satu siklus berisi 100 lead. Total persentase CS aktif harus tepat 100%.</p></div><span className={`allocation-total ${totalAllocation === 100 ? 'allocation-total--valid' : ''}`}>{totalAllocation}% / 100%</span></header>
-        {activeMembers.length ? (
-          <div className="team-allocation-list">
-            <div className="allocation-progress" role="progressbar" aria-label="Total pembagian lead" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(totalAllocation, 100)}><span style={{ width: `${Math.min(totalAllocation, 100)}%` }} /></div>
-            <p className={`allocation-guidance ${totalAllocation === 100 ? 'allocation-guidance--valid' : ''}`} role="status">
-              {totalAllocation === 100 ? 'Pembagian sudah lengkap dan siap disimpan.' : totalAllocation < 100 ? `Tambahkan ${allocationDifference}% lagi agar rotasi dapat diaktifkan.` : `Kurangi ${allocationDifference}% agar total kembali tepat 100%.`}
-            </p>
-            {activeMembers.map((member) => (
-              <div className="team-allocation-row" key={member.userId}>
-                <Avatar name={member.displayName} size="sm" />
-                <div><strong>{member.displayName}</strong><span>{member.allocatedInCycle} dari {member.allocationPercent} slot siklus terpakai</span></div>
-                <label><span className="sr-only">Persentase {member.displayName}</span><input type="number" min="1" max="100" value={allocations[member.userId] ?? 0} onChange={(event) => setAllocations((current) => ({ ...current, [member.userId]: Number(event.target.value) }))} /><strong>%</strong></label>
-              </div>
-            ))}
-            <div className="team-distribution-actions"><p>Perubahan pembagian akan memulai siklus baru tanpa memindahkan lead lama.</p><button className="button button--primary" disabled={totalAllocation !== 100 || saveDistribution.isPending} onClick={() => saveDistribution.mutate()}><Save size={17} />{saveDistribution.isPending ? 'Menyimpan…' : 'Simpan pembagian'}</button></div>
-          </div>
-        ) : <div className="team-empty"><UsersRound size={24} /><strong>Belum ada CS aktif</strong><span>Tambahkan akun CS sebelum mengatur pembagian lead.</span></div>}
-      </section>
+      <div className="team-workbench">
+        <section className="panel team-distribution-card">
+          <header className="panel__header"><div><h2>Rotasi jatah lead</h2><p>Satu siklus berisi 100 lead. Total persentase CS aktif harus tepat 100%.</p></div><span className={`allocation-total ${totalAllocation === 100 ? 'allocation-total--valid' : ''}`}>{totalAllocation}% / 100%</span></header>
+          {activeMembers.length ? (
+            <div className="team-allocation-list">
+              <div className="allocation-progress" role="progressbar" aria-label="Total pembagian lead" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(totalAllocation, 100)}><span style={{ width: `${Math.min(totalAllocation, 100)}%` }} /></div>
+              <p className={`allocation-guidance ${totalAllocation === 100 ? 'allocation-guidance--valid' : ''}`} role="status">
+                {totalAllocation === 100 ? 'Pembagian sudah lengkap dan siap disimpan.' : totalAllocation < 100 ? `Tambahkan ${allocationDifference}% lagi agar rotasi dapat diaktifkan.` : `Kurangi ${allocationDifference}% agar total kembali tepat 100%.`}
+              </p>
+              {activeMembers.map((member) => (
+                <div className="team-allocation-row" key={member.userId}>
+                  <Avatar name={member.displayName} size="sm" />
+                  <div><strong>{member.displayName}</strong><span>{member.allocatedInCycle} dari {member.allocationPercent} slot siklus terpakai</span></div>
+                  <label><span className="sr-only">Persentase {member.displayName}</span><input type="number" min="1" max="100" value={allocations[member.userId] ?? 0} onChange={(event) => setAllocations((current) => ({ ...current, [member.userId]: Number(event.target.value) }))} /><strong>%</strong></label>
+                </div>
+              ))}
+              <div className="team-distribution-actions"><p>Perubahan pembagian akan memulai siklus baru tanpa memindahkan lead lama.</p><button className="button button--primary" disabled={totalAllocation !== 100 || saveDistribution.isPending} onClick={() => saveDistribution.mutate()}><Save size={17} />{saveDistribution.isPending ? 'Menyimpan…' : 'Simpan pembagian'}</button></div>
+            </div>
+          ) : <div className="team-empty"><UsersRound size={24} /><strong>Belum ada CS aktif</strong><span>Tambahkan akun CS sebelum mengatur pembagian lead.</span></div>}
+        </section>
+        <aside className="team-workbench__summary" aria-label="Ringkasan tim CS">
+          <div><span>CS aktif</span><strong>{activeMembers.length}</strong><small>Akun siap menerima lead</small></div>
+          <div><span>Status rotasi</span><strong>{totalAllocation === 100 ? 'Siap' : 'Perlu diatur'}</strong><small>{totalAllocation === 100 ? 'Distribusi lead dapat berjalan otomatis.' : `Total saat ini ${totalAllocation}%.`}</small></div>
+          <p><BarChart3 size={17} />Lead baru dibagikan otomatis. Lead lama tidak dipindahkan agar histori performa tetap akurat.</p>
+        </aside>
+      </div>
 
       <section className="panel team-performance-card">
         <header className="panel__header"><div><h2>Leaderboard performa CS</h2><p>Urutan berdasarkan Deal, kemudian jumlah lead yang ditangani.</p></div><label className="period-control"><span>Periode</span><select value={period} onChange={(event) => setPeriod(event.target.value as DashboardPeriod)}><option value="today">Hari ini</option><option value="week">7 hari</option><option value="month">30 hari</option><option value="all">Semua</option></select></label></header>
         <div className="data-table-wrap"><table className="data-table team-table"><thead><tr><th>Peringkat</th><th>CS</th><th>Jatah</th><th>Lead</th><th>Aktif</th><th>Deal</th><th>Konversi</th><th>Nilai pipeline</th><th>Aksi</th></tr></thead><tbody>{performance.data.map((member, index) => <tr key={member.userId}><td><span className={`rank-badge ${index < 3 ? 'rank-badge--top' : ''}`}>{index < 3 ? <Medal size={15} /> : null}{index + 1}</span></td><td><div className="table-contact"><Avatar name={member.displayName} size="sm" /><span><strong>{member.displayName}</strong><small>{member.email}</small></span></div></td><td>{member.allocationPercent}%</td><td>{member.assignedLeads}</td><td>{member.openLeads}</td><td><strong>{member.deals}</strong></td><td>{member.conversionRate}%</td><td>{formatCompactCurrency(member.pipelineValue)}</td><td><div className="team-row-actions"><button className="button button--small button--secondary" onClick={() => { setResetTarget({ userId: member.userId, displayName: member.displayName }); setResetPassword(''); setResetPasswordConfirmation(''); setSuccessNotice(''); }}><KeyRound size={15} />Reset password</button><button className={`button button--small ${member.isActive ? 'button--secondary' : 'button--success'}`} disabled={update.isPending} onClick={() => update.mutate({ userId: member.userId, email: member.email, displayName: member.displayName, isActive: !member.isActive })}>{member.isActive ? <UserMinus size={15} /> : <UserCheck size={15} />}{member.isActive ? 'Nonaktifkan' : 'Aktifkan'}</button></div></td></tr>)}</tbody></table></div>
       </section>
-      <p className="team-policy-note"><BarChart3 size={16} />Lead baru dibagikan otomatis; lead lama tetap pada CS sebelumnya untuk menjaga histori performa.</p>
 
       {resetTarget ? (
         <Dialog title={`Reset password ${resetTarget.displayName}`} description="Password lama langsung tidak berlaku setelah perubahan disimpan." size="sm" onClose={() => setResetTarget(null)}>

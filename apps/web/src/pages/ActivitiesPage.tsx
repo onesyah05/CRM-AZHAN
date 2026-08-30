@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MessageCircleMore, Search, Target, TrendingUp } from 'lucide-react';
 import type { Activity } from '@azhan-crm/contracts';
 import { api } from '../api';
-import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui';
+import { EmptyState, ErrorState, LoadingState } from '../components/ui';
 import { formatRelativeTime } from '../utils';
 
 const activityLabels: Record<Activity['type'] | 'all', string> = {
@@ -28,8 +28,8 @@ export function ActivitiesPage() {
   if (activities.error) return <ErrorState message="Aktivitas belum dapat dimuat." onRetry={() => void activities.refetch()} />;
 
   return (
-    <div className="page">
-      <PageHeader title="Aktivitas" description="Jejak perubahan penting, follow-up, pesan, dan Deal dalam workspace aktif." />
+    <div className="page activities-page">
+      <header className="directory-page-header"><div><span className="eyebrow">Riwayat workspace</span><h1>Aktivitas</h1><p>Jejak perubahan penting, follow-up, pesan, dan Deal dalam workspace aktif.</p></div><span className="directory-page-header__count">{filtered.length} aktivitas</span></header>
       <section className="panel activities-page-panel">
         <div className="table-tools activities-tools">
           <label className="search-input search-input--wide"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari aktivitas atau pelaku…" /></label>

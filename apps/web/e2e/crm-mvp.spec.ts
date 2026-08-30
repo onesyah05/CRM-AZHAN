@@ -51,7 +51,7 @@ test('kontak, filter inbox, dan aktivitas dapat digunakan', async ({ page }) => 
 
 test('lead dapat diedit lalu diproses menjadi Book Seat', async ({ page }) => {
   await page.goto('/pipeline');
-  await expect(page.getByRole('heading', { name: 'Pipeline Penjualan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Gerakkan lead sampai booking.' })).toBeVisible();
 
   await page.getByRole('button', { name: /Nadia Rahma/ }).first().click();
   await expect(page.getByRole('dialog', { name: 'Detail lead' })).toBeVisible();
@@ -77,7 +77,7 @@ test('lead dapat diedit lalu diproses menjadi Book Seat', async ({ page }) => {
 
 test('admin dapat mengatur distribusi dan melihat leaderboard CS', async ({ page }) => {
   await page.getByRole('link', { name: /Tim CS/ }).click();
-  await expect(page.getByRole('heading', { name: 'Tim CS & Distribusi Lead' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tim CS dan distribusi lead' })).toBeVisible();
   await expect(page.getByText('100% / 100%')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Leaderboard performa CS' })).toBeVisible();
 
@@ -104,4 +104,27 @@ test('alur utama mobile tidak memiliki pelanggaran aksesibilitas blocker atau cr
   expect(inboxAudit.violations.filter((violation) => ['critical', 'blocker'].includes(violation.impact ?? ''))).toEqual([]);
   const inboxOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(inboxOverflow).toBeLessThanOrEqual(1);
+});
+
+test('layout utama tetap rapi pada breakpoint target', async ({ page }) => {
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 768, height: 900 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 1000 },
+  ]) {
+    await page.setViewportSize(viewport);
+
+    for (const path of ['/', '/conversations', '/pipeline', '/team']) {
+      await page.goto(path);
+      await page.locator('main').waitFor();
+      const horizontalPageScroll = await page.evaluate(() => {
+        window.scrollTo({ left: 10_000 });
+        const currentScroll = window.scrollX;
+        window.scrollTo({ left: 0 });
+        return currentScroll;
+      });
+      expect(horizontalPageScroll, `${path} dapat menggeser halaman pada lebar ${viewport.width}px`).toBeLessThanOrEqual(1);
+    }
+  }
 });

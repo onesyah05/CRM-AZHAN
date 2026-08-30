@@ -21,12 +21,15 @@ import { api } from '../api';
 import { getBrandForeground } from '../theme';
 import { Avatar } from './ui';
 
-const navItems = [
+const workspaceNavItems = [
   { to: '/', label: 'Ringkasan', icon: BarChart3, end: true },
   { to: '/conversations', label: 'Percakapan', icon: MessageCircleMore },
   { to: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
   { to: '/contacts', label: 'Kontak', icon: UsersRound },
   { to: '/activities', label: 'Aktivitas', icon: ClipboardList },
+];
+
+const managementNavItems = [
   { to: '/team', label: 'Tim CS', icon: UserCog, managerOnly: true },
   { to: '/settings/whatsapp', label: 'Pengaturan', icon: Settings, managerOnly: true },
 ];
@@ -42,6 +45,21 @@ export function AppShell({ user, children }: { user: UserContext; children: Reac
   const waQuery = useQuery({ queryKey: ['whatsapp-status'], queryFn: api.whatsappStatus, refetchInterval: 8_000 });
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
   const waConnected = waQuery.data?.status === 'connected';
+  const waStatus = waQuery.data?.status;
+  const waStatusLabel = waConnected
+    ? 'WA terhubung'
+    : waStatus === 'qr_required'
+      ? 'WA siap dipindai'
+      : waStatus === 'reconnecting'
+        ? 'WA menghubungkan'
+        : waStatus === 'logged_out'
+          ? 'WA perlu login'
+          : 'WA perlu perhatian';
+  const waStatusClass = waConnected
+    ? 'connection-chip--connected'
+    : waStatus === 'qr_required' || waStatus === 'reconnecting'
+      ? 'connection-chip--warning'
+      : '';
   const unreadCount = conversations.data?.reduce((sum, conversation) => sum + conversation.unread, 0) ?? 0;
   const brandColor = user.brand?.primaryColor ?? '#CC904A';
   const brandName = user.brand?.name ?? 'Azhan ERP';
@@ -78,8 +96,9 @@ export function AppShell({ user, children }: { user: UserContext; children: Reac
           <button className="sidebar__mobile-close" onClick={() => setMobileOpen(false)} aria-label="Tutup navigasi"><X size={20} /></button>
         </div>
         <nav className="sidebar__nav" aria-label="Navigasi utama">
-          <span className="sidebar__label">CRM</span>
-          {navItems.filter((item) => !item.managerOnly || user.role !== 'sales').map(({ to, label, icon: Icon, end }) => (
+          <div className="sidebar__nav-group">
+            <span className="sidebar__label">Workspace</span>
+            {workspaceNavItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -91,7 +110,22 @@ export function AppShell({ user, children }: { user: UserContext; children: Reac
               <span>{label}</span>
               {label === 'Percakapan' && unreadCount > 0 ? <span className="nav-count">{unreadCount > 99 ? '99+' : unreadCount}</span> : null}
             </NavLink>
-          ))}
+            ))}
+          </div>
+          {user.role !== 'sales' ? <div className="sidebar__nav-group sidebar__nav-group--management">
+            <span className="sidebar__label">Kelola</span>
+            {managementNavItems.filter((item) => !item.managerOnly || user.role !== 'sales').map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                onClick={() => setMobileOpen(false)}
+              >
+                <span className="nav-item__icon"><Icon size={19} /></span>
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </div> : null}
         </nav>
         <div className="sidebar__footer">
           <div className={`wa-mini-status ${waConnected ? 'wa-mini-status--connected' : ''}`}>
@@ -112,8 +146,8 @@ export function AppShell({ user, children }: { user: UserContext; children: Reac
             <kbd>Ctrl K</kbd>
 		  </form>
           <div className="topbar__actions">
-            <span className={`connection-chip ${waConnected ? 'connection-chip--connected' : ''}`}>
-              <span className="status-dot" />{waConnected ? 'WA terhubung' : 'WA terputus'}
+            <span className={`connection-chip ${waStatusClass}`}>
+              <span className="status-dot" />{waStatusLabel}
             </span>
             <button className="icon-button" onClick={() => navigate('/conversations?unread=1')} aria-label={`${unreadCount} pesan belum dibaca`}><Bell size={20} />{unreadCount > 0 ? <span className="notification-dot" /> : null}</button>
             <div className="user-menu"><Avatar name={user.name} size="sm" /><div><strong>{user.name}</strong><span>{roleLabel}</span></div><button className="icon-button" onClick={() => logout.mutate()} disabled={logout.isPending} aria-label="Keluar dari CRM" title="Keluar"><LogOut size={17} /></button></div>

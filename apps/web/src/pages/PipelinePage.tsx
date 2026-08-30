@@ -1,12 +1,12 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ChevronDown, CircleDollarSign, Filter, GripVertical, MoreHorizontal, Search, TicketCheck, UserRound } from 'lucide-react';
+import { CalendarClock, ChevronDown, CircleDollarSign, Filter, GripVertical, Search, TicketCheck, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Lead } from '@azhan-crm/contracts';
 import { api, ApiClientError } from '../api';
 import { DealWizard } from '../components/DealWizard';
 import { LeadDrawer } from '../components/LeadDrawer';
-import { Avatar, Dialog, EmptyState, ErrorState, LoadingState, PageHeader, TagPill } from '../components/ui';
+import { Avatar, Dialog, EmptyState, ErrorState, LoadingState, TagPill } from '../components/ui';
 import { commitmentLabel, formatCompactCurrency, formatRelativeTime } from '../utils';
 
 function LostDialog({ lead, onClose, onSubmit, pending, error }: { lead: Lead; onClose: () => void; onSubmit: (reason: string) => void; pending: boolean; error: string }) {
@@ -36,6 +36,7 @@ export function PipelinePage() {
   const leads = useQuery({ queryKey: ['leads'], queryFn: api.leads });
   const stages = useQuery({ queryKey: ['stages'], queryFn: api.stages });
   const schedules = useQuery({ queryKey: ['schedules'], queryFn: api.schedules });
+  const scheduleOptions = schedules.data ?? [];
 
   const moveMutation = useMutation({
     mutationFn: ({ leadId, stageId, lostReason }: { leadId: string; stageId: string; lostReason?: string }) => api.moveLead(leadId, stageId, lostReason),
@@ -80,23 +81,34 @@ export function PipelinePage() {
     if (lead) requestStageChange(lead, stageId);
   };
 
-  if (leads.isLoading || stages.isLoading || schedules.isLoading) return <LoadingState label="Menyiapkan pipeline…" />;
-  if (leads.error || stages.error || schedules.error || !stages.data || !schedules.data) return <ErrorState message="Pipeline belum tersedia." onRetry={() => void leads.refetch()} />;
+  if (leads.isLoading || stages.isLoading) return <LoadingState label="Menyiapkan pipeline…" />;
+  if (leads.error || stages.error || !stages.data) return <ErrorState message="Pipeline belum tersedia." onRetry={() => void Promise.all([leads.refetch(), stages.refetch(), schedules.refetch()])} />;
 
   return (
     <div className="page page--pipeline">
-      <PageHeader title="Pipeline Penjualan" description="Kelola perjalanan setiap calon jamaah dari percakapan pertama sampai booking." actions={<button className="button button--primary" onClick={() => navigate('/conversations')}>Buka inbox</button>} />
-      <section className="pipeline-toolbar">
+      <header className="pipeline-page-header">
+        <div>
+          <span className="eyebrow">Pipeline penjualan</span>
+          <h1>Gerakkan lead sampai booking.</h1>
+          <p>Pantau posisi, nilai, dan PIC setiap calon jamaah dalam satu papan kerja.</p>
+        </div>
+        <div className="pipeline-page-header__actions">
+          <span className="pipeline-live-stat"><strong>{filteredLeads.length}</strong> lead terlihat</span>
+          <button className="button button--primary" onClick={() => navigate('/conversations')}>Buka inbox</button>
+        </div>
+      </header>
+      {schedules.error ? <div className="inline-error pipeline-data-warning" role="alert"><span>Data paket belum tersedia. Pipeline tetap dapat digunakan.</span><button className="button button--secondary button--small" onClick={() => void schedules.refetch()}>Muat ulang paket</button></div> : null}
+      <section className="pipeline-toolbar" aria-label="Kontrol pipeline">
         <label className="search-input search-input--wide"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari nama, nomor, atau paket…" /></label>
         <label className="select-button"><UserRound size={17} /><select value={assignee} onChange={(event) => setAssignee(event.target.value)}><option>Semua PIC</option>{assignees.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></label>
         <button className={`button button--secondary ${filtersOpen ? 'button--active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen}><Filter size={17} />Filter</button>
-        <div className="pipeline-summary"><span><strong>{filteredLeads.length}</strong> lead</span><span><CircleDollarSign size={16} /><strong>{formatCompactCurrency(activeValue)}</strong> aktif</span></div>
+        <div className="pipeline-summary"><span><CircleDollarSign size={16} /><strong>{formatCompactCurrency(activeValue)}</strong><small>nilai aktif</small></span></div>
       </section>
 
       {filtersOpen ? <section className="panel pipeline-filter-row" aria-label="Filter pipeline">
         <label className="field"><span>Tahap</span><select value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="all">Semua tahap</option>{stages.data.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>
         <label className="field"><span>Tag</span><select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="all">Semua tag</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></label>
-        <label className="field"><span>Paket</span><select value={scheduleFilter} onChange={(event) => setScheduleFilter(event.target.value)}><option value="all">Semua paket</option>{schedules.data.map((schedule) => <option key={schedule.id} value={schedule.id}>{schedule.name}</option>)}</select></label>
+        <label className="field"><span>Paket</span><select value={scheduleFilter} disabled={schedules.isLoading || Boolean(schedules.error)} onChange={(event) => setScheduleFilter(event.target.value)}><option value="all">{schedules.isLoading ? 'Memuat paket…' : 'Semua paket'}</option>{scheduleOptions.map((schedule) => <option key={schedule.id} value={schedule.id}>{schedule.name}</option>)}</select></label>
         <label className="pipeline-filter-check"><input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.target.checked)} />Hanya lead belum dibaca</label>
         <button className="button button--secondary button--small" onClick={() => { setStageFilter('all'); setTagFilter('all'); setScheduleFilter('all'); setUnreadOnly(false); }}>Reset</button>
       </section> : null}
@@ -115,14 +127,15 @@ export function PipelinePage() {
               aria-label={`Tahap ${stage.name}, ${stageLeads.length} lead`}
             >
               <header className="kanban-column__header" style={{ '--stage-color': stage.color } as React.CSSProperties}>
-                <div><span className="stage-dot" /><strong>{stage.name}</strong><em>{stageLeads.length}</em></div><button className="icon-button" aria-label={`Opsi tahap ${stage.name}`}><MoreHorizontal size={17} /></button>
-                <small>{formatCompactCurrency(stageValue)}</small>
+                <div className="kanban-column__title"><span className="stage-dot" /><strong>{stage.name}</strong><em aria-label={`${stageLeads.length} lead`}>{stageLeads.length}</em></div>
+                <small>{stageLeads.length ? `${formatCompactCurrency(stageValue)} nilai pipeline` : 'Belum ada lead pada tahap ini'}</small>
               </header>
               <div className="kanban-column__body">
                 {stageLeads.map((lead) => (
                   <article
                     className="lead-card"
                     key={lead.id}
+                    style={{ '--stage-color': stage.color } as React.CSSProperties}
                     draggable
                     onDragStart={(event) => { event.dataTransfer.setData('text/lead-id', lead.id); event.dataTransfer.effectAllowed = 'move'; }}
                   >
@@ -134,7 +147,7 @@ export function PipelinePage() {
                     </button>
                     <div className="lead-card__tags">{lead.tags.slice(0, 2).map((tag) => <TagPill key={tag.id} tag={tag} />)}{lead.dealSubstatus ? <span className="commitment-badge"><TicketCheck size={13} />{commitmentLabel(lead.dealSubstatus)}</span> : null}</div>
                     <footer><span>{lead.assignee}</span><span className={lead.stageAgeDays >= 3 ? 'age-warning' : ''}>{lead.stageAgeDays ? `${lead.stageAgeDays} hari` : formatRelativeTime(lead.updatedAt)}</span>{lead.unread ? <span className="unread-badge">{lead.unread}</span> : null}</footer>
-                    <label className="move-stage-select"><span className="sr-only">Pindahkan {lead.name} ke tahap</span><select value="" onChange={(event) => { if (event.target.value) requestStageChange(lead, event.target.value); }}><option value="">Pindah tahap…</option>{stages.data.filter((item) => item.id !== lead.stageId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label className="move-stage-select" style={{ '--stage-color': stage.color } as React.CSSProperties}><span className="sr-only">Tahap lead {lead.name}</span><select value={lead.stageId} onChange={(event) => { if (event.target.value !== lead.stageId) requestStageChange(lead, event.target.value); }}>{stages.data.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   </article>
                 ))}
                 {!stageLeads.length ? <EmptyState title="Belum ada lead" description="Tarik kartu ke tahap ini." /> : null}
@@ -146,8 +159,8 @@ export function PipelinePage() {
       <div className="sr-only" aria-live="polite">{moveMutation.isSuccess ? 'Tahap lead berhasil diperbarui.' : ''}</div>
       {moveMutation.error && !lostLead ? <div className="toast toast--error" role="alert">{moveMutation.error instanceof ApiClientError ? moveMutation.error.message : 'Tahap belum berubah.'}</div> : null}
 
-      {detailLead ? <LeadDrawer lead={leads.data?.find((item) => item.id === detailLead.id) ?? detailLead} stages={stages.data} schedules={schedules.data} onClose={() => setDetailLead(null)} onDeal={(lead) => { setDetailLead(null); setDealLead(lead); }} /> : null}
-      {dealLead ? <DealWizard lead={dealLead} schedules={schedules.data} onClose={() => setDealLead(null)} onCompleted={() => void queryClient.invalidateQueries({ queryKey: ['leads'] })} /> : null}
+      {detailLead ? <LeadDrawer lead={leads.data?.find((item) => item.id === detailLead.id) ?? detailLead} stages={stages.data} schedules={scheduleOptions} onClose={() => setDetailLead(null)} onDeal={(lead) => { setDetailLead(null); setDealLead(lead); }} /> : null}
+      {dealLead ? <DealWizard lead={dealLead} schedules={scheduleOptions} onClose={() => setDealLead(null)} onCompleted={() => void queryClient.invalidateQueries({ queryKey: ['leads'] })} /> : null}
       {lostLead ? <LostDialog lead={lostLead} onClose={() => setLostLead(null)} pending={moveMutation.isPending} error={moveMutation.error instanceof ApiClientError ? moveMutation.error.message : ''} onSubmit={(reason) => moveMutation.mutate({ leadId: lostLead.id, stageId: 'lost', lostReason: reason })} /> : null}
     </div>
   );

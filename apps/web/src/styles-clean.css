@@ -1,5 +1,6 @@
 :root {
-  font-family: 'Plus Jakarta Sans', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', 'Jakarta Sans', sans-serif;
+  font-family: var(--font-sans);
   font-style: normal;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -27,7 +28,7 @@
   --page-gap: clamp(18px, 2.5vw, 36px);
 }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-html, body, #root { width: 100%; min-width: 320px; height: 100%; min-height: 100%; margin: 0; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; min-height: 100%; margin: 0; font-family: var(--font-sans); }
 html, body { overflow: hidden; }
 body { min-height: 100vh; background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.55; }
 button, input, select, textarea { font: inherit; color: inherit; }

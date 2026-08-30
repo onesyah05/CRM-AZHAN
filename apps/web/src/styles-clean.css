@@ -96,7 +96,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sidebar__label { margin: 0 10px 7px; color: #94a0b1; font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .nav-item { min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 11px; border-radius: 10px; color: #536176; font-size: 13px; font-weight: 650; }
 .nav-item:hover { color: var(--ink); background: #f3f6f9; }
-.nav-item--active { color: color-mix(in srgb, var(--brand) 84%, var(--ink)); background: color-mix(in srgb, var(--brand) 11%, #fff); box-shadow: inset 3px 0 0 var(--brand); }
+.nav-item--active { color: color-mix(in srgb, var(--brand) 84%, var(--ink)); background: color-mix(in srgb, var(--brand) 11%, #fff); box-shadow: none; }
 .nav-item__icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: #7d8ca0; }
 .nav-item--active .nav-item__icon { color: var(--brand); }
 .nav-count { min-width: 21px; height: 21px; display: grid; place-items: center; margin-left: auto; padding: 0 6px; border-radius: 999px; color: var(--brand-ink); background: var(--brand); font-size: 10px; font-weight: 800; }

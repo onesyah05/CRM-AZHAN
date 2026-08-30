@@ -14,6 +14,7 @@ export function DashboardPage({ user }: { user: UserContext }) {
   if (dashboard.error || !dashboard.data || !stages.data) return <ErrorState message="Ringkasan belum tersedia." onRetry={() => void dashboard.refetch()} />;
 
   const maxStage = Math.max(...dashboard.data.stageDistribution.map((item) => item.count), 1);
+  const activeLeadCount = dashboard.data.stageDistribution.filter((item) => !['deal', 'lost'].includes(item.stageId)).reduce((sum, item) => sum + item.count, 0);
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 11 ? 'Selamat pagi' : hour < 15 ? 'Selamat siang' : hour < 18 ? 'Selamat sore' : 'Selamat malam';
@@ -27,6 +28,7 @@ export function DashboardPage({ user }: { user: UserContext }) {
           <p>Prioritaskan respons cepat, lalu dorong calon jamaah yang sudah siap mengambil keputusan.</p>
         </div>
         <div className="dashboard-hero__actions">
+          <span className="dashboard-health"><i /><span><strong>{activeLeadCount}</strong><small>lead aktif</small></span></span>
           <label className="select-button"><span className="sr-only">Periode dashboard</span><select value={period} onChange={(event) => setPeriod(event.target.value as DashboardPeriod)}><option value="today">24 jam</option><option value="week">7 hari</option><option value="month">30 hari</option><option value="all">Semua waktu</option></select></label>
           <a className="button button--secondary" href="/conversations?unread=1"><Eye size={17} />Buka inbox</a>
         </div>

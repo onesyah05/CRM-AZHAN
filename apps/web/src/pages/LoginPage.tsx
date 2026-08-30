@@ -21,6 +21,7 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <aside className="login-story" aria-label="Ringkasan Azhan CRM">
+        <div className="login-story__ambient" aria-hidden="true"><i /><i /><i /></div>
         <div className="login-story__brand"><span><Sparkles size={20} /></span><strong>Azhan ERP</strong></div>
         <div className="login-story__content">
           <span className="login-story__eyebrow">CRM UNTUK TRAVEL UMRAH</span>
@@ -41,7 +42,7 @@ export function LoginPage() {
           <label className="field"><span>Email</span><input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@travel.com" required /></label>
           <label className="field"><span>Password</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Masukkan password" required /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
           {error ? <div className="inline-error" role="alert">{error instanceof ApiClientError ? error.message : 'Login belum berhasil.'}</div> : null}
-          <button className="button button--primary button--large" disabled={login.isPending}>{login.isPending ? 'Memeriksa akun…' : <>Masuk <ArrowRight size={18} /></>}</button>
+          <button className="button button--primary button--large login-submit" disabled={login.isPending} aria-busy={login.isPending}>{login.isPending ? 'Memeriksa akun…' : <>Masuk <ArrowRight size={18} /></>}</button>
           <small className="login-security"><ShieldCheck size={14} />Sesi browser menggunakan cookie HttpOnly.</small>
         </form>
         <p className="login-footer">Bagian dari ekosistem Azhan ERP</p>

@@ -85,7 +85,7 @@ export function AppShell({ user, children }: { user: UserContext; children: Reac
     >
       <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Buka navigasi"><Menu /></button>
       {mobileOpen ? <button className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-label="Tutup navigasi" /> : null}
-      <aside className={`sidebar ${mobileOpen ? 'sidebar--mobile-open' : ''}`}>
+      <aside className={`sidebar ${mobileOpen ? 'sidebar--mobile-open' : ''}`} aria-label="Navigasi workspace">
         <div className="sidebar__brand">
           {user.brand?.logoUrl && !logoFailed ? (
             <img className="sidebar__brand-logo" src={user.brand.logoUrl} alt={`Logo ${brandName}`} onError={() => setLogoFailed(true)} />

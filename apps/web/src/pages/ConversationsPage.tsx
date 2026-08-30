@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Check, CheckCheck, ChevronLeft, Clock3, FileText, Filter, Info, Paperclip, Search, Send, TicketCheck, UserRound } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, CheckCheck, ChevronLeft, Clock3, FileText, Filter, Info, PackageOpen, Paperclip, Search, Send, TicketCheck, UserRound } from 'lucide-react';
 import type { Lead, Message, UserContext } from '@azhan-crm/contracts';
 import { useSearchParams } from 'react-router-dom';
 import { api, ApiClientError } from '../api';
@@ -68,6 +68,15 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const selected = conversations.data?.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedLead = leads.data?.find((lead) => lead.id === selected?.leadId) ?? null;
   const whatsappConnected = whatsappStatus.data?.status === 'connected';
+  const activeFilterCount = [unreadOnly, assignedOnly, assigneeFilter !== 'all', stageFilter !== 'all', tagFilter !== 'all', periodFilter !== 'all'].filter(Boolean).length;
+  const resetConversationFilters = () => {
+    setUnreadOnly(false);
+    setAssignedOnly(false);
+    setAssigneeFilter('all');
+    setStageFilter('all');
+    setTagFilter('all');
+    setPeriodFilter('all');
+  };
 
   const pauseTyping = (conversationId = selectedId) => {
 	if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -141,8 +150,8 @@ export function ConversationsPage({ user }: { user: UserContext }) {
           <span className="inbox-live-status"><i className={whatsappConnected ? 'online-dot' : ''} />{whatsappConnected ? 'Terhubung' : 'Offline'}</span>
         </header>
         <div className="conversation-tools">
-          <label className="search-input"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari percakapan…" /></label>
-          <button className={`icon-button ${filtersOpen ? 'icon-button--active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen} aria-label="Filter percakapan"><Filter size={18} /></button>
+          <label className="search-input"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari percakapan…" aria-label="Cari percakapan" /></label>
+          <button className={`icon-button conversation-filter-button ${filtersOpen ? 'icon-button--active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen} aria-label="Filter percakapan"><Filter size={18} />{activeFilterCount ? <span>{activeFilterCount}</span> : null}</button>
         </div>
         {filtersOpen ? <div className="conversation-filters">
           <label><span>PIC</span><select value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)}><option value="all">Semua PIC</option>{assignees.map((name) => <option key={name}>{name}</option>)}</select></label>
@@ -150,11 +159,12 @@ export function ConversationsPage({ user }: { user: UserContext }) {
           <label><span>Tag</span><select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="all">Semua tag</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></label>
           <label><span>Waktu</span><select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)}><option value="all">Semua waktu</option><option value="today">24 jam</option><option value="week">7 hari</option><option value="month">30 hari</option></select></label>
           <label className="conversation-filter-check"><input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.target.checked)} />Belum dibaca</label>
+          {activeFilterCount ? <button className="conversation-filter-reset" onClick={resetConversationFilters}>Reset filter</button> : null}
         </div> : null}
         <div className="inbox-tabs"><button className={`inbox-tab ${!assignedOnly ? 'inbox-tab--active' : ''}`} onClick={() => setAssignedOnly(false)}>Semua <span>{filtered.length}</span></button><button className={`inbox-tab ${assignedOnly ? 'inbox-tab--active' : ''}`} onClick={() => setAssignedOnly(true)}>Ditugaskan ke saya</button></div>
         <div className="conversation-list">
           {filtered.map((conversation) => (
-            <button key={conversation.id} className={`conversation-row ${selectedId === conversation.id ? 'conversation-row--active' : ''}`} onClick={() => setSelectedId(conversation.id)}>
+            <button key={conversation.id} className={`conversation-row ${selectedId === conversation.id ? 'conversation-row--active' : ''}`} onClick={() => setSelectedId(conversation.id)} aria-pressed={selectedId === conversation.id}>
               <span className="avatar-wrap"><Avatar name={conversation.name} />{conversation.online ? <i className="online-dot" /> : null}</span>
               <span className="conversation-row__content">
                 <span className="conversation-row__top"><strong>{conversation.name}</strong><time>{formatRelativeTime(conversation.lastMessageAt)}</time></span>
@@ -192,6 +202,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
 				  </div>
                 </div>
               ))}
+              {!messages.isLoading && !messages.data?.length ? <EmptyState title="Belum ada pesan" description="Mulai percakapan dari kolom balasan di bawah." /> : null}
             </div>
             <form className="composer" onSubmit={(event) => { event.preventDefault(); if (composer.trim()) sendMutation.mutate(); }}>
               {!whatsappConnected ? <div className="composer-warning" role="status">WhatsApp tidak terhubung. Histori tetap dapat dibaca, tetapi pengiriman dinonaktifkan. <a href="/settings/whatsapp">Periksa koneksi</a></div> : null}
@@ -223,9 +234,9 @@ export function ConversationsPage({ user }: { user: UserContext }) {
             <div className="contact-properties">
               <div><span><UserRound size={16} /> PIC</span><strong>{selectedLead.assignee}</strong></div>
               <div><span><TicketCheck size={16} /> Tahap</span><strong>{stages.data?.find((stage) => stage.id === selectedLead.stageId)?.name}</strong></div>
-              <div><span>Paket diminati</span><strong>{selectedLead.scheduleName || 'Belum dipilih'}</strong></div>
-              <div><span>Rencana berangkat</span><strong>{selectedLead.departurePlan || 'Belum diisi'}</strong></div>
-              <div><span>Follow-up berikutnya</span><strong>{formatDateTime(selectedLead.nextFollowUp)}</strong></div>
+              <div><span><PackageOpen size={16} /> Paket diminati</span><strong>{selectedLead.scheduleName || 'Belum dipilih'}</strong></div>
+              <div><span><CalendarDays size={16} /> Rencana berangkat</span><strong>{selectedLead.departurePlan || 'Belum diisi'}</strong></div>
+              <div><span><Clock3 size={16} /> Follow-up berikutnya</span><strong>{formatDateTime(selectedLead.nextFollowUp)}</strong></div>
             </div>
             <div className="contact-note"><span>Catatan</span><p>{selectedLead.notes || 'Belum ada catatan.'}</p></div>
             <div className="contact-panel__actions"><button className="button button--secondary" onClick={() => setDetailLead(selectedLead)}>Lihat & edit detail</button>{selectedLead.stageId !== 'deal' ? <button className="button button--success" onClick={() => setDealLead(selectedLead)}>Proses Deal</button> : null}</div>

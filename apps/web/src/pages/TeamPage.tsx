@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Eye, EyeOff, KeyRound, Medal, Plus, Save, UserCheck, UserMinus, UsersRound, X } from 'lucide-react';
+import { BarChart3, CircleCheckBig, Eye, EyeOff, KeyRound, Medal, Plus, Save, Target, TrendingUp, UserCheck, UserMinus, UsersRound, X } from 'lucide-react';
 import type { DashboardPeriod } from '@azhan-crm/contracts';
 import { api, ApiClientError } from '../api';
 import { Avatar, Dialog, ErrorState, LoadingState } from '../components/ui';
@@ -32,6 +32,8 @@ export function TeamPage() {
   const activeMembers = team.data?.filter((member) => member.isActive) ?? [];
   const totalAllocation = useMemo(() => activeMembers.reduce((sum, member) => sum + (allocations[member.userId] ?? 0), 0), [activeMembers, allocations]);
   const allocationDifference = Math.abs(100 - totalAllocation);
+  const assignedLeadCount = performance.data?.reduce((sum, member) => sum + member.assignedLeads, 0) ?? 0;
+  const dealCount = performance.data?.reduce((sum, member) => sum + member.deals, 0) ?? 0;
   const refreshTeam = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['team'] }),
@@ -81,9 +83,16 @@ export function TeamPage() {
         <button className="button button--primary" onClick={() => setShowCreate((value) => !value)}>{showCreate ? <X size={17} /> : <Plus size={17} />}{showCreate ? 'Tutup form' : 'Tambah akun CS'}</button>
       </header>
 
+      <section className="team-insights" aria-label="Ringkasan operasional tim CS">
+        <div><span><UsersRound size={18} /></span><small>CS aktif</small><strong>{activeMembers.length}</strong></div>
+        <div className={totalAllocation === 100 ? 'team-insight--success' : 'team-insight--warning'}><span><CircleCheckBig size={18} /></span><small>Rotasi lead</small><strong>{totalAllocation === 100 ? 'Siap' : `${totalAllocation}%`}</strong></div>
+        <div><span><TrendingUp size={18} /></span><small>Lead ditangani</small><strong>{assignedLeadCount}</strong></div>
+        <div><span><Target size={18} /></span><small>Deal periode ini</small><strong>{dealCount}</strong></div>
+      </section>
+
       {showCreate ? (
         <form className="panel team-create-form" onSubmit={(event) => { event.preventDefault(); if (createPasswordMatches) create.mutate(); }}>
-          <div><h2>Buat akun CS</h2><p>Akun ini hanya dapat mengakses CRM dan lead yang ditugaskan kepadanya.</p></div>
+          <div className="team-create-form__intro"><span><Plus size={18} /></span><div><h2>Buat akun CS</h2><p>Akun ini hanya dapat mengakses CRM dan lead yang ditugaskan kepadanya.</p></div></div>
           <label className="field"><span>Nama CS</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required minLength={2} /></label>
           <label className="field"><span>Email login</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
           <label className="field"><span>Password awal</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={8} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>

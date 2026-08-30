@@ -16,6 +16,7 @@ export function BrandSelectPage({ user }: { user: UserContext }) {
   const logout = useMutation({ mutationFn: api.logout, onSuccess: () => { queryClient.clear(); window.location.assign('/login'); } });
   return (
     <main className="standalone-state brand-select-page">
+      <div className="brand-select-ambient" aria-hidden="true"><i /><i /><i /></div>
       <section className="panel brand-select-card">
         <span className="brand-select-card__icon"><Building2 /></span>
         <p className="eyebrow">CRM · AZHAN ERP</p>
@@ -23,11 +24,11 @@ export function BrandSelectPage({ user }: { user: UserContext }) {
         <p>Data, room real-time, WhatsApp, dan pipeline akan dibatasi ke brand yang dipilih.</p>
         <div className="brand-select-list">
           {(user.availableBrands ?? []).map((brand) => (
-            <button key={brand.id} className="brand-select-option" disabled={select.isPending} onClick={() => select.mutate(brand.id)}>
+            <button key={brand.id} className="brand-select-option" disabled={select.isPending} onClick={() => select.mutate(brand.id)} aria-label={`Masuk ke workspace ${brand.name}`}>
               <span className="brand-select-option__mark" style={{ backgroundColor: brand.primaryColor, color: getBrandForeground(brand.primaryColor) }}>
                 {brand.logoUrl ? <img src={brand.logoUrl} alt="" /> : brand.name.slice(0, 1)}
               </span>
-              <strong>{brand.name}</strong><ArrowRight size={18} />
+              <span className="brand-select-option__copy"><strong>{brand.name}</strong><small>Masuk ke workspace</small></span><span className="brand-select-option__arrow"><ArrowRight size={18} /></span>
             </button>
           ))}
         </div>

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, Link2, LogOut, MessageCircleMore, QrCode, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Database, Link2, LogOut, MessageCircleMore, QrCode, RefreshCw, ShieldCheck, Smartphone, Wifi } from 'lucide-react';
 import { api, ApiClientError } from '../api';
 import { ErrorState, LoadingState } from '../components/ui';
 import { formatDateTime } from '../utils';
@@ -21,6 +21,13 @@ export function WhatsappSettingsPage({ user }: { user: UserContext }) {
       <div className="settings-grid">
         <section className="panel connection-card">
           <header><span className={`connection-card__icon ${connected ? 'connection-card__icon--connected' : ''}`}>{connected ? <CheckCircle2 /> : <Smartphone />}</span><div><h2>{connected ? 'WhatsApp terhubung' : 'WhatsApp belum terhubung'}</h2><p>{status.data.message}</p></div><span className={`connection-chip ${connected ? 'connection-chip--connected' : ''}`}><span className="status-dot" />{status.data.status.replace('_', ' ')}</span></header>
+          <div className="connection-flow" aria-label="Tahapan koneksi WhatsApp">
+            <div className={connected || status.data.qrDataUrl ? 'connection-flow__step connection-flow__step--complete' : 'connection-flow__step connection-flow__step--active'}><span><Smartphone size={17} /></span><div><strong>Perangkat</strong><small>{connected || status.data.qrDataUrl ? 'Dikenali' : 'Siap dihubungkan'}</small></div></div>
+            <i aria-hidden="true" />
+            <div className={connected ? 'connection-flow__step connection-flow__step--complete' : status.data.qrDataUrl || reconnecting ? 'connection-flow__step connection-flow__step--active' : 'connection-flow__step'}><span><Database size={17} /></span><div><strong>Sesi aman</strong><small>{connected ? 'Tersimpan' : status.data.qrDataUrl ? 'Menunggu QR' : 'Belum aktif'}</small></div></div>
+            <i aria-hidden="true" />
+            <div className={connected ? 'connection-flow__step connection-flow__step--complete' : 'connection-flow__step'}><span><Wifi size={17} /></span><div><strong>Inbox CRM</strong><small>{connected ? 'Sinkron aktif' : 'Menunggu koneksi'}</small></div></div>
+          </div>
           {status.data.qrDataUrl ? <div className="qr-panel"><img src={status.data.qrDataUrl} alt="QR untuk menghubungkan WhatsApp" /><div><h3>Pindai QR dari WhatsApp</h3><ol><li>Buka WhatsApp di ponsel.</li><li>Pilih Perangkat tertaut.</li><li>Pindai QR ini sebelum kedaluwarsa.</li></ol></div></div> : null}
           {connected ? <dl className="connection-details"><div><dt>Nomor</dt><dd>{status.data.phone}</dd></div><div><dt>Terhubung sejak</dt><dd>{status.data.lastConnectedAt ? formatDateTime(status.data.lastConnectedAt) : '—'}</dd></div><div><dt>Workspace</dt><dd>{user.brand?.name ?? '—'}</dd></div></dl> : null}
           {mutationError ? <div className="inline-error" role="alert">{mutationError instanceof ApiClientError ? mutationError.message : 'Aksi belum berhasil.'}</div> : null}

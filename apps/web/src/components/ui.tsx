@@ -4,7 +4,7 @@ import type { Tag } from '@azhan-crm/contracts';
 import { initials } from '../utils';
 
 export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
-  const colors = ['#2F6FED', '#7C3AED', '#168A55', '#C24175', '#B65C00'];
+  const colors = ['#2F6FED', '#7C3AED', '#137548', '#C24175', '#B65C00'];
   const index = [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) % colors.length;
   return (
     <span className={`avatar avatar--${size}`} style={{ backgroundColor: colors[index] }} aria-hidden="true">

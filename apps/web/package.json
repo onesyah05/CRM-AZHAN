@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@azhan-crm/contracts": "*",
-    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource-variable/roboto": "^5.3.0",
     "@tanstack/react-query": "5.102.8",
     "lucide-react": "1.35.0",
     "react": "19.2.8",

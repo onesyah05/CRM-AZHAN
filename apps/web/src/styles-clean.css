@@ -1,5 +1,5 @@
 :root {
-  --font-sans: 'Roboto', sans-serif;
+  --font-sans: 'Roboto Variable', 'Roboto', sans-serif;
   font-family: var(--font-sans);
   font-style: normal;
   font-synthesis: none;

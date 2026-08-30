@@ -102,6 +102,44 @@ describe('MySqlCrmStore', () => {
     expect(await store.getLead(202, first.lead.id)).toBeNull();
   });
 
+  it('mengimpor histori dua arah tanpa unread, aktivitas, atau rotasi lead baru', async () => {
+	const brandId = 404;
+	const common = {
+	  brandId,
+	  jid: '628123450404@s.whatsapp.net',
+	  phone: '+628123450404',
+	  name: 'Kontak Histori',
+	  historical: true,
+	} as const;
+	await store.ingestIncoming({
+	  ...common,
+	  messageId: 'history-inbound-old',
+	  body: 'Pertanyaan lama',
+	  occurredAt: '2026-01-01T01:00:00.000Z',
+	  direction: 'inbound',
+	  status: 'read',
+	});
+	await store.ingestIncoming({
+	  ...common,
+	  messageId: 'history-outbound-new',
+	  body: 'Balasan lama',
+	  occurredAt: '2026-01-01T01:05:00.000Z',
+	  direction: 'outbound',
+	  status: 'delivered',
+	});
+
+	const [conversation] = await store.listConversations(brandId);
+	const [lead] = await store.listLeads(brandId);
+	const messages = await store.listMessages(brandId, conversation!.id);
+	expect(conversation).toMatchObject({ unread: 0, lastMessage: 'Balasan lama' });
+	expect(lead?.assigneeUserId).toBeUndefined();
+	expect(messages?.map((message) => [message.direction, message.body, message.status])).toEqual([
+	  ['inbound', 'Pertanyaan lama', 'read'],
+	  ['outbound', 'Balasan lama', 'delivered'],
+	]);
+	await expect(store.listActivities(brandId)).resolves.toHaveLength(0);
+  });
+
   it('mempertahankan optimistic version dan menyimpan alasan Lost', async () => {
     const [lead] = await store.listLeads(101);
     expect(lead).toBeDefined();

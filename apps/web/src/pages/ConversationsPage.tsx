@@ -26,6 +26,8 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [dealLead, setDealLead] = useState<Lead | null>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
+	const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const typingConversation = useRef<string | null>(null);
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
   const leads = useQuery({ queryKey: ['leads'], queryFn: api.leads });
   const stages = useQuery({ queryKey: ['stages'], queryFn: api.stages });
@@ -67,9 +69,36 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const selectedLead = leads.data?.find((lead) => lead.id === selected?.leadId) ?? null;
   const whatsappConnected = whatsappStatus.data?.status === 'connected';
 
+  const pauseTyping = (conversationId = selectedId) => {
+	if (typingTimer.current) clearTimeout(typingTimer.current);
+	typingTimer.current = null;
+	if (conversationId && typingConversation.current === conversationId) {
+	  typingConversation.current = null;
+	  void api.updatePresence(conversationId, 'paused').catch(() => undefined);
+	}
+  };
+
+  const updateComposer = (value: string) => {
+	setComposer(value);
+	if (!selectedId || !whatsappConnected) return;
+	if (typingTimer.current) clearTimeout(typingTimer.current);
+	if (!value.trim()) {
+	  pauseTyping(selectedId);
+	  return;
+	}
+	if (typingConversation.current !== selectedId) {
+	  typingConversation.current = selectedId;
+	  void api.updatePresence(selectedId, 'composing').catch(() => undefined);
+	}
+	typingTimer.current = setTimeout(() => pauseTyping(selectedId), 1_800);
+  };
+
+  useEffect(() => () => pauseTyping(selectedId), [selectedId]);
+
   const sendMutation = useMutation({
     mutationFn: () => api.sendMessage(selectedId!, composer.trim()),
     onSuccess: async () => {
+	  pauseTyping(selectedId);
       setComposer('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['messages', selectedId] }),
@@ -80,6 +109,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const mediaMutation = useMutation({
     mutationFn: (file: File) => api.sendMedia(selectedId!, file, composer.trim()),
     onSuccess: async () => {
+	  pauseTyping(selectedId);
       setComposer('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['messages', selectedId] }),
@@ -107,7 +137,8 @@ export function ConversationsPage({ user }: { user: UserContext }) {
     <div className={`conversation-workspace ${selectedId ? 'conversation-workspace--selected' : ''} ${!profileOpen ? 'conversation-workspace--profile-hidden' : ''}`}>
       <section className="conversation-list-panel">
         <header className="conversation-list-header">
-          <div><h1>Percakapan</h1><span>{conversations.data?.reduce((sum, item) => sum + item.unread, 0)} belum dibaca</span></div>
+          <div><span className="eyebrow">Inbox WhatsApp</span><h1>Percakapan</h1><span>{conversations.data?.reduce((sum, item) => sum + item.unread, 0)} pesan belum dibaca</span></div>
+          <span className="inbox-live-status"><i className={whatsappConnected ? 'online-dot' : ''} />{whatsappConnected ? 'Terhubung' : 'Offline'}</span>
         </header>
         <div className="conversation-tools">
           <label className="search-input"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari percakapan…" /></label>
@@ -143,7 +174,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
             <header className="message-header">
               <button className="icon-button message-header__back" onClick={() => setSelectedId(null)} aria-label="Kembali ke daftar"><ChevronLeft /></button>
               <Avatar name={selected.name} />
-              <div><strong>{selected.name}</strong><span><i className="online-dot" /> WhatsApp · {selected.phone}</span></div>
+              <div className="message-header__identity"><strong>{selected.name}</strong><span>{selected.online ? <i className="online-dot" /> : null}{selected.presence === 'typing' ? 'Sedang mengetik…' : selected.presence === 'recording' ? 'Sedang merekam audio…' : selected.presence === 'online' ? 'Online' : 'WhatsApp'} · {selected.phone}</span></div>
               <div className="message-header__actions"><button className={`icon-button ${profileOpen ? 'icon-button--active' : ''}`} onClick={() => setProfileOpen((value) => !value)} aria-pressed={profileOpen} aria-label="Tampilkan profil lead"><Info size={19} /></button></div>
             </header>
             <div className="message-history" aria-live="polite">
@@ -152,6 +183,8 @@ export function ConversationsPage({ user }: { user: UserContext }) {
                 <div key={message.id} className={`message-bubble-wrap message-bubble-wrap--${message.direction}`}>
 				  <div className="message-bubble">
 					{message.type === 'image' && message.mediaUrl ? <a href={message.mediaUrl} target="_blank" rel="noreferrer"><img className="message-media-image" src={message.mediaUrl} alt={message.fileName ?? 'Lampiran gambar'} /></a> : null}
+					{message.type === 'video' && message.mediaUrl ? <video className="message-media-video" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran video'} /> : null}
+					{message.type === 'audio' && message.mediaUrl ? <audio className="message-media-audio" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran audio'} /> : null}
 					{message.type === 'document' && message.mediaUrl ? <a className="message-document" href={message.mediaUrl} target="_blank" rel="noreferrer"><FileText size={18} />{message.fileName ?? 'Buka dokumen'}</a> : null}
 					{message.body ? <p>{message.body}</p> : null}
 					<span>{new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.sentAt))}{message.direction === 'outbound' ? statusIcon(message) : null}</span>
@@ -165,10 +198,10 @@ export function ConversationsPage({ user }: { user: UserContext }) {
               {sendMutation.error || mediaMutation.error ? <div className="composer-error" role="alert">{(sendMutation.error ?? mediaMutation.error) instanceof ApiClientError ? (sendMutation.error ?? mediaMutation.error)?.message : 'Pesan belum terkirim.'}</div> : null}
               <div className="composer__box">
                 <button type="button" className="icon-button" disabled={!whatsappConnected || mediaMutation.isPending} aria-label="Lampirkan file" onClick={() => fileInput.current?.click()}><Paperclip size={19} /></button>
-                <input ref={fileInput} hidden type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) mediaMutation.mutate(file); event.currentTarget.value = ''; }} />
+                <input ref={fileInput} hidden type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) mediaMutation.mutate(file); event.currentTarget.value = ''; }} />
                 <textarea
                   value={composer}
-                  onChange={(event) => setComposer(event.target.value)}
+                  onChange={(event) => updateComposer(event.target.value)}
                   onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (composer.trim()) sendMutation.mutate(); } }}
                   placeholder="Tulis balasan WhatsApp…"
                   rows={1}

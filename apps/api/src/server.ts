@@ -35,6 +35,7 @@ const whatsapp: WhatsAppGateway = config.testFixtures
 	config.waAuthDriver,
 	databasePool ?? undefined,
 	config.sessionEncryptionKey,
+	logger,
   );
 const outboxWorkerId = `crm-api-${process.pid}-${crypto.randomUUID()}`;
 let outboxRunning = false;
@@ -751,13 +752,59 @@ app.post('/api/v1/leads/:id/deal', requireBrand, mutationLimiter, async (request
   }
 });
 
-app.get('/api/v1/conversations', requireBrand, async (request, response) => response.json(await store.listConversations(brandId(request), assigneeScope(request))));
+app.get('/api/v1/conversations', requireBrand, async (request, response) => {
+  const currentBrandId = brandId(request);
+  const conversations = await store.listConversations(currentBrandId, assigneeScope(request));
+  response.json(conversations.map((conversation) => {
+	const presence = whatsapp.getPresence(currentBrandId, conversation.phone);
+	return {
+	  ...conversation,
+	  ...presence,
+	  online: presence.presence !== 'offline',
+	};
+  }));
+});
 app.get('/api/v1/conversations/:id/messages', requireBrand, async (request, response) => {
-  const allowed = (await store.listConversations(brandId(request), assigneeScope(request))).some((item) => item.id === String(request.params.id));
+  const currentBrandId = brandId(request);
+  const conversationId = String(request.params.id);
+  const allowed = (await store.listConversations(currentBrandId, assigneeScope(request))).some((item) => item.id === conversationId);
   if (!allowed) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
-  const messages = await store.listMessages(brandId(request), String(request.params.id));
+  const transport = config.testFixtures
+	? null
+	: await (store as MySqlCrmStore).getConversationTransportContext(currentBrandId, conversationId);
+  const messages = await store.listMessages(currentBrandId, conversationId);
   if (!messages) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
+  if (transport) {
+	try {
+	  await whatsapp.subscribePresence(currentBrandId, transport.phone);
+	  if (transport.messageIds.length && whatsapp.getStatus(currentBrandId).status === 'connected') {
+		await whatsapp.markRead(currentBrandId, transport.phone, transport.messageIds);
+		await (store as MySqlCrmStore).markInboundMessagesRead(currentBrandId, conversationId, transport.messageIds);
+	  }
+	} catch (error) {
+	  logger.warn({
+		eventType: 'whatsapp_conversation_sync_failed',
+		brandId: currentBrandId,
+		errorName: error instanceof Error ? error.name : 'UnknownError',
+	  }, 'WhatsApp presence/read synchronization failed');
+	}
+  }
   response.json(messages);
+});
+
+app.post('/api/v1/conversations/:id/presence', requireBrand, mutationLimiter, async (request, response) => {
+  const parsed = z.object({ presence: z.enum(['composing', 'paused']) }).safeParse(request.body);
+  if (!parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Status mengetik belum valid.');
+  const currentBrandId = brandId(request);
+  const conversation = (await store.listConversations(currentBrandId, assigneeScope(request)))
+	.find((item) => item.id === String(request.params.id));
+  if (!conversation) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
+  try {
+	await whatsapp.sendPresence(currentBrandId, conversation.phone, parsed.data.presence);
+	response.status(204).end();
+  } catch (error) {
+	sendError(response, 503, 'WHATSAPP_PRESENCE_FAILED', error instanceof Error ? error.message : 'Status mengetik belum terkirim.', true);
+  }
 });
 
 app.post('/api/v1/conversations/:id/messages', requireBrand, mutationLimiter, async (request, response) => {
@@ -787,7 +834,7 @@ app.post(
   '/api/v1/conversations/:id/media',
   requireBrand,
   mutationLimiter,
-  express.raw({ type: () => true, limit: '10mb' }),
+  express.raw({ type: () => true, limit: '25mb' }),
   async (request, response) => {
 	if (config.testFixtures) return sendError(response, 409, 'MEDIA_TEST_UNAVAILABLE', 'Lampiran tidak tersedia pada fixture pengujian.');
 	if (!(await canAccessConversation(request, String(request.params.id)))) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
@@ -796,14 +843,32 @@ app.post(
 	let decodedFileName: string;
 	try { decodedFileName = decodeURIComponent(rawFileName); } catch { return sendError(response, 400, 'INVALID_FILE_NAME', 'Nama file belum valid.'); }
 	const fileName = basename(decodedFileName).slice(0, 255);
-	const mimeType = (request.header('content-type') ?? 'application/octet-stream').split(';')[0] ?? 'application/octet-stream';
+	const extensionMimeTypes: Record<string, string> = {
+	  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
+	  '.mp4': 'video/mp4', '.3gp': 'video/3gpp', '.mov': 'video/quicktime', '.webm': 'video/webm',
+	  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.opus': 'audio/opus', '.wav': 'audio/wav', '.aac': 'audio/aac',
+	  '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+	};
+	const declaredMimeType = (request.header('content-type') ?? 'application/octet-stream').split(';')[0] ?? 'application/octet-stream';
+	const mimeType = declaredMimeType === 'application/octet-stream'
+	  ? extensionMimeTypes[extname(fileName).toLowerCase()] ?? declaredMimeType
+	  : declaredMimeType;
 	const allowedMimeTypes = new Set([
 	  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf',
+	  'video/mp4', 'video/3gpp', 'video/quicktime', 'video/webm',
+	  'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/opus', 'audio/wav', 'audio/webm', 'audio/aac',
 	  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 	  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 	]);
 	if (!allowedMimeTypes.has(mimeType)) return sendError(response, 415, 'UNSUPPORTED_MEDIA_TYPE', 'Format lampiran tidak didukung.');
-	const type = mimeType.startsWith('image/') ? 'image' as const : 'document' as const;
+	const type = mimeType.startsWith('image/')
+	  ? 'image' as const
+	  : mimeType.startsWith('video/')
+		? 'video' as const
+		: mimeType.startsWith('audio/')
+		  ? 'audio' as const
+		  : 'document' as const;
 	const caption = String(request.query.caption ?? '').slice(0, 4_000);
 	const objectKey = await persistIncomingMedia(brandId(request), { data: request.body, fileName });
 	const message = await (store as MySqlCrmStore).enqueueOutboundMedia(brandId(request), String(request.params.id), {
@@ -832,7 +897,8 @@ app.get('/api/v1/messages/:id/media', requireBrand, async (request, response) =>
   const path = resolveMediaPath(media.objectKey);
   if (!path) return sendError(response, 404, 'MEDIA_NOT_FOUND', 'Lampiran tidak ditemukan.');
   response.type(media.mimeType);
-  response.setHeader('Content-Disposition', `${media.mimeType.startsWith('image/') ? 'inline' : 'attachment'}; filename="${basename(media.fileName).replaceAll('"', '')}"`);
+  const disposition = /^(image|video|audio)\//.test(media.mimeType) ? 'inline' : 'attachment';
+  response.setHeader('Content-Disposition', `${disposition}; filename="${basename(media.fileName).replaceAll('"', '')}"`);
   response.sendFile(path, (error) => {
     if (error && !response.headersSent) sendError(response, 404, 'MEDIA_NOT_FOUND', 'Lampiran tidak ditemukan.');
   });
@@ -850,7 +916,7 @@ async function processOutboundQueue() {
 		continue;
 	  }
 	  try {
-		if (job.payload.type === 'image' || job.payload.type === 'document') {
+		if (job.payload.type && job.payload.type !== 'text') {
 		  const mediaPath = job.payload.mediaObjectKey ? resolveMediaPath(job.payload.mediaObjectKey) : null;
 		  if (!mediaPath) throw new Error('File lampiran tidak ditemukan.');
 		  await whatsapp.sendMedia({
@@ -915,10 +981,55 @@ whatsapp.onIncoming(async (incoming) => {
   io.to(`brand:${incoming.sessionId}`).emit('message.created', created);
 });
 
+whatsapp.onHistory(async (messages) => {
+  if (config.testFixtures || !messages.length) return;
+  let imported = 0;
+  for (const historical of messages) {
+	try {
+	  const mediaObjectKey = historical.media
+		? await persistIncomingMedia(historical.sessionId, historical.media)
+		: undefined;
+	  await (store as MySqlCrmStore).ingestIncoming({
+		brandId: historical.sessionId,
+		messageId: historical.messageId,
+		jid: historical.jid,
+		phone: historical.phone,
+		name: historical.pushName,
+		body: historical.body,
+		occurredAt: historical.occurredAt,
+		type: historical.type,
+		direction: historical.direction,
+		status: historical.status,
+		historical: true,
+		...(mediaObjectKey ? { mediaObjectKey } : {}),
+		...(historical.media ? { mediaMimeType: historical.media.mimeType, mediaFileName: historical.media.fileName } : {}),
+	  });
+	  imported += 1;
+	} catch (error) {
+	  logger.warn({
+		eventType: 'whatsapp_history_message_import_failed',
+		brandId: historical.sessionId,
+		errorName: error instanceof Error ? error.name : 'UnknownError',
+	  }, 'A WhatsApp history message could not be imported');
+	}
+  }
+  const sessionId = messages[0]!.sessionId;
+  io.to(`brand:${sessionId}`).emit('history.synced', { imported });
+  logger.info({ eventType: 'whatsapp_history_synced', brandId: sessionId, imported }, 'WhatsApp history chunk imported');
+});
+
 whatsapp.onStatus(async (update) => {
   if (config.testFixtures) return;
   const message = await (store as MySqlCrmStore).updateMessageStatus(update.sessionId, update.messageId, update.status);
   if (message) io.to(`brand:${update.sessionId}`).emit('message.status.updated', message);
+});
+
+whatsapp.onPresence((update) => {
+  io.to(`brand:${update.sessionId}`).emit('presence.updated', {
+	phone: update.phone,
+	presence: update.presence,
+	...(update.lastSeenAt ? { lastSeenAt: update.lastSeenAt } : {}),
+  });
 });
 
 if (!config.testFixtures && config.nodeEnv !== 'test') {
@@ -964,6 +1075,10 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 if (config.nodeEnv !== 'test' || config.startServer) {
   httpServer.listen(config.apiPort, () => {
     logger.info({ port: config.apiPort, mode: config.testFixtures ? 'test' : 'integration' }, 'Azhan CRM API ready');
+	void whatsapp.restoreConnections().catch((error) => logger.error({
+	  eventType: 'whatsapp_restore_connections_failed',
+	  errorName: error instanceof Error ? error.name : 'UnknownError',
+	}, 'WhatsApp persisted connections could not be restored'));
   });
 }
 

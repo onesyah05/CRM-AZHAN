@@ -95,6 +95,10 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
 	retryMessage: (messageId: string) => request<Message>(`/api/v1/messages/${messageId}/retry`, { method: 'POST' }),
+	updatePresence: (conversationId: string, presence: 'composing' | 'paused') =>
+	  request<void>(`/api/v1/conversations/${conversationId}/presence`, {
+		method: 'POST', body: JSON.stringify({ presence }),
+	  }),
 	sendMedia: async (conversationId: string, file: File, caption = ''): Promise<Message> => {
 	  const response = await fetch(`/api/v1/conversations/${conversationId}/media?caption=${encodeURIComponent(caption)}`, {
 		method: 'POST', credentials: 'include', headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) }, body: file,

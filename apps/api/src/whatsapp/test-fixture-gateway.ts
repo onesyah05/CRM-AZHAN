@@ -1,5 +1,5 @@
 import type { MessageStatus, WhatsAppStatus } from '@azhan-crm/contracts';
-import type { IncomingWhatsAppMessage, WhatsAppGateway } from './gateway.js';
+import type { HistoricalWhatsAppMessage, IncomingWhatsAppMessage, WhatsAppGateway, WhatsAppPresenceUpdate } from './gateway.js';
 
 export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
   private status: WhatsAppStatus = {
@@ -12,6 +12,8 @@ export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
 
   private incomingHandler: ((message: IncomingWhatsAppMessage) => Promise<void>) | null = null;
 	private statusHandler: ((update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>) | null = null;
+
+  async restoreConnections(): Promise<void> {}
 
   async connect(): Promise<void> {
     this.status = {
@@ -39,6 +41,16 @@ export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
 	return { messageId: input.messageId ?? `fixture-wa-${crypto.randomUUID()}` };
   }
 
+  async subscribePresence(): Promise<void> {}
+
+  async sendPresence(): Promise<void> {}
+
+  async markRead(): Promise<void> {}
+
+  getPresence(): { presence: 'offline' } {
+    return { presence: 'offline' };
+  }
+
   getStatus(): WhatsAppStatus {
     return this.status;
   }
@@ -47,7 +59,11 @@ export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
     this.incomingHandler = handler;
   }
 
+  onHistory(_handler: (messages: HistoricalWhatsAppMessage[]) => Promise<void>): void {}
+
   onStatus(handler: (update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>): void {
 	this.statusHandler = handler;
   }
+
+  onPresence(_handler: (update: WhatsAppPresenceUpdate) => void): void {}
 }

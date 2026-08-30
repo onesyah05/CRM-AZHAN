@@ -1,0 +1,33 @@
+# Runbook koneksi WhatsApp
+
+## Menghubungkan nomor
+
+1. Masuk sebagai admin Travel pada brand yang sesuai.
+2. Buka **Pengaturan → Koneksi WhatsApp**.
+3. Pilih **Tampilkan QR**, lalu pindai dari menu **Perangkat tertaut** pada WhatsApp.
+4. Pastikan status berubah menjadi `connected` sebelum mengirim pesan.
+
+QR dan kredensial tidak boleh disalin ke log, tiket, atau repository. Sesi production disimpan terenkripsi di database dan dibatasi satu sesi per brand.
+
+## Reconnect
+
+Gateway melakukan reconnect dengan exponential backoff dan hanya mempertahankan satu timer serta satu socket per brand. Tombol **Coba lagi sekarang** membatalkan waktu tunggu reconnect dan memulai percobaan segera.
+
+Saat worker/API hidup kembali, sesi database yang masih memiliki auth terenkripsi dipulihkan otomatis. Lease lama tetap dihormati dan akan dicoba ulang setelah kedaluwarsa.
+
+Jika worker sebelumnya berhenti mendadak, lease database dapat bertahan maksimal 45 detik. Kondisi ini ditampilkan sebagai `reconnecting` dan dicoba ulang otomatis; pengguna tidak menerima error internal.
+
+Event penutupan dari socket lama diabaikan bila socket baru sudah mengambil alih. Hal ini mencegah koneksi baru ikut terhapus akibat event yang datang terlambat.
+
+## Pemeriksaan gangguan
+
+- Pastikan `/health` melaporkan database, ERP, dan outbox sehat.
+- Periksa log terstruktur `whatsapp_reconnect_scheduled`, `whatsapp_connect_failed`, dan `whatsapp_lock_release_failed` berdasarkan `brandId`.
+- Log hanya memuat kode status dan nama error; jangan mencatat QR, auth state, nomor lengkap, atau isi pesan.
+- Bila status tetap `reconnecting`, pilih **Coba lagi sekarang**. Restart worker menjadi langkah terakhir setelah memastikan tidak ada worker lain yang memegang lease sesi.
+
+## Logout perangkat
+
+Gunakan **Keluar & hapus sesi** hanya jika perangkat memang harus dilepas. Tindakan ini melakukan logout WhatsApp dan membutuhkan pemindaian QR baru.
+
+Ketika WhatsApp sendiri mengirim status `logged_out`, gateway menunggu penulisan auth yang sedang berjalan lalu menghapus kredensial terenkripsi yang sudah tidak valid. Percobaan koneksi berikutnya dimulai dari auth kosong agar QR baru dapat diterbitkan dan tidak kembali memakai sesi yang telah ditolak.

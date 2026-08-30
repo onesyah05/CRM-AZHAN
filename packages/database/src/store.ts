@@ -70,6 +70,10 @@ interface ConversationRow extends RowDataPacket {
   assignee_name: string | null;
 }
 
+interface ConversationTransportRow extends RowDataPacket {
+  whatsapp_jid: string;
+}
+
 interface TeamMemberRow extends RowDataPacket {
   brand_id: number;
   erp_user_id: number;
@@ -110,7 +114,7 @@ export interface OutboundMessageJob {
     conversationId: string;
     phone: string;
     body: string;
-	type?: 'text' | 'image' | 'document';
+	type?: Message['type'];
 	mediaObjectKey?: string;
 	mimeType?: string;
 	fileName?: string;
@@ -656,7 +660,39 @@ export class MySqlCrmStore {
       ...(row.assignee_erp_user_id ? { assigneeUserId: row.assignee_erp_user_id } : {}),
       tags: tags.get(row.lead_id) ?? [],
       online: false,
+      presence: 'offline',
     }));
+  }
+
+  async getConversationTransportContext(brandId: number, conversationId: string): Promise<{ phone: string; messageIds: string[] } | null> {
+    const [conversations] = await this.pool.execute<ConversationTransportRow[]>(
+      `SELECT whatsapp_jid FROM crm_conversations WHERE brand_id=? AND id=UUID_TO_BIN(?) LIMIT 1`,
+      [brandId, conversationId],
+    );
+    const jid = conversations[0]?.whatsapp_jid;
+    if (!jid) return null;
+    const [messages] = await this.pool.execute<(RowDataPacket & { whatsapp_message_id: string })[]>(
+      `SELECT whatsapp_message_id FROM crm_messages
+        WHERE brand_id=? AND conversation_id=UUID_TO_BIN(?) AND direction='inbound'
+          AND status<>'read' AND whatsapp_message_id IS NOT NULL
+        ORDER BY sent_at DESC LIMIT 500`,
+      [brandId, conversationId],
+    );
+    return {
+      phone: jid.split('@')[0] ?? '',
+      messageIds: messages.map((message) => message.whatsapp_message_id),
+    };
+  }
+
+  async markInboundMessagesRead(brandId: number, conversationId: string, messageIds: string[]): Promise<void> {
+    if (!messageIds.length) return;
+    const placeholders = messageIds.map(() => '?').join(',');
+    await this.pool.execute(
+      `UPDATE crm_messages SET status='read'
+        WHERE brand_id=? AND conversation_id=UUID_TO_BIN(?) AND direction='inbound'
+          AND whatsapp_message_id IN (${placeholders})`,
+      [brandId, conversationId, ...messageIds],
+    );
   }
 
   async listMessages(brandId: number, conversationId: string): Promise<Message[] | null> {
@@ -772,7 +808,7 @@ export class MySqlCrmStore {
   async enqueueOutboundMedia(
     brandId: number,
     conversationId: string,
-    input: { type: 'image' | 'document'; body: string; mediaObjectKey: string; mimeType: string; fileName: string },
+    input: { type: Exclude<Message['type'], 'text'>; body: string; mediaObjectKey: string; mimeType: string; fileName: string },
   ): Promise<Message | null> {
     const connection = await this.pool.getConnection();
     const messageId = randomUUID();
@@ -961,8 +997,14 @@ export class MySqlCrmStore {
 	mediaObjectKey?: string;
 	mediaMimeType?: string;
 	mediaFileName?: string;
+	direction?: Message['direction'];
+	status?: Message['status'];
+	historical?: boolean;
   }): Promise<{ conversation: Conversation; lead: Lead; message: Message }> {
     await this.ensureBrand(input.brandId);
+	const direction = input.direction ?? 'inbound';
+	const historical = input.historical ?? false;
+	const messageStatus = input.status ?? (direction === 'outbound' ? 'sent' : 'delivered');
     const connection = await this.pool.getConnection();
     let conversationId = '';
     let leadId = '';
@@ -1017,7 +1059,7 @@ export class MySqlCrmStore {
           if (!stageId) throw new Error('DEFAULT_STAGE_MISSING');
           leadId = randomUUID();
           conversationId = randomUUID();
-          const assignee = await this.nextLeadAssignee(connection, input.brandId);
+		  const assignee = historical ? null : await this.nextLeadAssignee(connection, input.brandId);
           await connection.execute(
             `INSERT INTO crm_leads
                (id, brand_id, contact_id, stage_id, assignee_erp_user_id, assignee_name, room_type, pax, estimated_value)
@@ -1030,13 +1072,15 @@ export class MySqlCrmStore {
              VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), UUID_TO_BIN(?), ?, '', NULL, 0)`,
             [conversationId, input.brandId, String(contact.id), leadId, jid],
           );
-          await connection.execute(
-            `INSERT INTO crm_activities
-               (id, brand_id, lead_id, activity_type, title, description, actor_name, occurred_at)
-             VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), 'message', ?, 'Lead dibuat otomatis dari percakapan pertama.', 'WhatsApp', ?)`,
-            [randomUUID(), input.brandId, leadId, `Pesan baru dari ${input.name || input.phone}`, toSqlDate(input.occurredAt)],
-          );
-          if (assignee) {
+		  if (!historical) {
+			await connection.execute(
+			  `INSERT INTO crm_activities
+				 (id, brand_id, lead_id, activity_type, title, description, actor_name, occurred_at)
+			   VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), 'message', ?, 'Lead dibuat otomatis dari percakapan pertama.', 'WhatsApp', ?)`,
+			  [randomUUID(), input.brandId, leadId, `Pesan baru dari ${input.name || input.phone}`, toSqlDate(input.occurredAt)],
+			);
+		  }
+          if (assignee && !historical) {
             await connection.execute(
               `INSERT INTO crm_activities
                  (id, brand_id, lead_id, activity_type, title, description, actor_erp_user_id, actor_name, occurred_at)
@@ -1049,20 +1093,22 @@ export class MySqlCrmStore {
         const [insertResult] = await connection.execute<ResultSetHeader>(
           `INSERT IGNORE INTO crm_messages
 			 (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,media_object_key,media_mime_type,media_file_name,status,sent_at)
-		   VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,'inbound',?,?,?,?,?,'delivered',?)`,
-		  [localMessageId,input.brandId,conversationId,input.messageId,input.type ?? 'text',input.body,
-			input.mediaObjectKey ?? null,input.mediaMimeType ?? null,input.mediaFileName ?? null,toSqlDate(input.occurredAt)],
+		   VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,?,?,?,?,?,?, ?,?)`,
+		  [localMessageId,input.brandId,conversationId,input.messageId,direction,input.type ?? 'text',input.body,
+			input.mediaObjectKey ?? null,input.mediaMimeType ?? null,input.mediaFileName ?? null,messageStatus,toSqlDate(input.occurredAt)],
         );
         inserted = insertResult.affectedRows === 1;
         if (inserted) {
           await connection.execute(
             `UPDATE crm_conversations
-                SET last_message_preview=?, last_message_at=?, unread_count=unread_count+1
-              WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
-            [input.body, toSqlDate(input.occurredAt), input.brandId, conversationId],
+				SET last_message_preview=?, last_message_at=?, unread_count=unread_count+?
+			  WHERE brand_id=? AND id=UUID_TO_BIN(?)
+				AND (last_message_at IS NULL OR last_message_at<=?)`,
+			[input.body, toSqlDate(input.occurredAt), direction === 'inbound' && !historical ? 1 : 0,
+			  input.brandId, conversationId, toSqlDate(input.occurredAt)],
           );
           await connection.execute(
-            'UPDATE crm_leads SET updated_at=? WHERE brand_id=? AND id=UUID_TO_BIN(?)',
+			'UPDATE crm_leads SET updated_at=GREATEST(updated_at,?) WHERE brand_id=? AND id=UUID_TO_BIN(?)',
             [toSqlDate(input.occurredAt), input.brandId, leadId],
           );
         }

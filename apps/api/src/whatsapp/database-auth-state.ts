@@ -8,7 +8,7 @@ import {
   type SignalDataSet,
   type SignalDataTypeMap,
 } from '@whiskeysockets/baileys';
-import type { Pool, RowDataPacket } from 'mysql2/promise';
+import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 interface StoredAuthState {
   creds: AuthenticationCreds;
@@ -40,6 +40,8 @@ function decrypt(value: Buffer, secret: string): StoredAuthState {
 export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: string): Promise<{
   state: AuthenticationState;
   saveCreds: () => Promise<void>;
+  flush: () => Promise<void>;
+  clear: () => Promise<void>;
 }> {
   const [rows] = await pool.execute<(RowDataPacket & { encrypted_auth_state: Buffer | null })[]>(
     'SELECT encrypted_auth_state FROM crm_whatsapp_sessions WHERE brand_id=? LIMIT 1',
@@ -58,6 +60,18 @@ export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: 
          VALUES (?,?,'disconnected')
          ON DUPLICATE KEY UPDATE encrypted_auth_state=VALUES(encrypted_auth_state)`,
         [brandId, encrypted],
+      );
+    });
+    return writeChain;
+  };
+
+  const clear = () => {
+    writeChain = writeChain.then(async () => {
+      await pool.execute(
+        `UPDATE crm_whatsapp_sessions
+         SET encrypted_auth_state=NULL,phone_e164=NULL,last_connected_at=NULL
+         WHERE brand_id=?`,
+        [brandId],
       );
     });
     return writeChain;
@@ -92,5 +106,15 @@ export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: 
       },
     },
   };
-  return { state, saveCreds: persist };
+  return { state, saveCreds: persist, flush: () => writeChain, clear };
+}
+
+export async function clearLoggedOutDatabaseAuthState(pool: Pool, brandId: number): Promise<boolean> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    `UPDATE crm_whatsapp_sessions
+     SET encrypted_auth_state=NULL,phone_e164=NULL,last_connected_at=NULL
+     WHERE brand_id=? AND connection_status='logged_out'`,
+    [brandId],
+  );
+  return result.affectedRows > 0;
 }

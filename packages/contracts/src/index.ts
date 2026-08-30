@@ -8,6 +8,8 @@ export type ConnectionStatus =
 
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type MessageDirection = 'inbound' | 'outbound';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'document';
+export type ContactPresence = 'offline' | 'online' | 'typing' | 'recording';
 export type CommitmentType = 'book_seat' | 'dp' | 'lunas';
 export type DashboardPeriod = 'today' | 'week' | 'month' | 'all';
 export type DealSubstatus =
@@ -115,13 +117,15 @@ export interface Conversation {
   assigneeUserId?: number;
   tags: Tag[];
   online: boolean;
+  presence: ContactPresence;
+  lastSeenAt?: string;
 }
 
 export interface Message {
   id: string;
   conversationId: string;
   direction: MessageDirection;
-  type: 'text' | 'image' | 'document';
+  type: MessageType;
   body: string;
   sentAt: string;
   status: MessageStatus;

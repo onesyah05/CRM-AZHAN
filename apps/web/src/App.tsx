@@ -35,6 +35,14 @@ function AuthenticatedApp() {
       socket.on('message.status.updated', () => {
         void queryClient.invalidateQueries({ queryKey: ['messages'] });
       });
+      socket.on('presence.updated', () => {
+        void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      });
+      socket.on('history.synced', () => {
+        void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        void queryClient.invalidateQueries({ queryKey: ['messages'] });
+        void queryClient.invalidateQueries({ queryKey: ['leads'] });
+      });
       socket.on('context.changed', () => {
         void queryClient.invalidateQueries();
       });

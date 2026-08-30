@@ -137,6 +137,7 @@ const baseConversations: Conversation[] = baseLeads.slice(0, 6).map((lead, index
   assignee: lead.assignee,
   tags: lead.tags,
   online: index === 0,
+  presence: index === 0 ? 'online' : 'offline',
 }));
 
 const baseMessages: Message[] = [
@@ -393,6 +394,7 @@ export class TestFixtureStore {
         assignee: lead.assignee,
         tags: [],
         online: false,
+        presence: 'offline',
       };
       this.leads.push(lead);
       this.conversations.push(conversation);

@@ -27,8 +27,8 @@
   --page-gap: clamp(18px, 2.5vw, 36px);
 }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-html, body, #root { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
-html, body { overflow-x: hidden; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; min-height: 100%; margin: 0; }
+html, body { overflow: hidden; }
 body { min-height: 100vh; background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.55; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button, a, select { -webkit-tap-highlight-color: transparent; }
@@ -81,16 +81,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .inline-success { border: 1px solid #bbf7d0; color: #166534; background: var(--success-bg); font-weight: 600; }
 
 /* shell */
-.app-shell { --brand: var(--color-brand, #cc904a); --brand-ink: var(--color-brand-foreground, #18181b); min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); background: var(--canvas); }
-.app-main { min-width: 0; }
-.sidebar { position: sticky; top: 0; z-index: 30; width: 236px; height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: #fff; }
+.app-shell { --brand: var(--color-brand, #cc904a); --brand-ink: var(--color-brand-foreground, #18181b); width: 100%; height: 100dvh; min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); overflow: hidden; background: var(--canvas); }
+.app-main { min-width: 0; min-height: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar { position: relative; z-index: 30; width: 236px; height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: #fff; }
 .sidebar__brand { min-height: 76px; display: flex; align-items: center; gap: 11px; padding: 0 18px; border-bottom: 1px solid var(--line); }
 .sidebar__brand > div { min-width: 0; display: flex; flex-direction: column; }
 .sidebar__brand strong { overflow: hidden; color: var(--ink); font-size: 14px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__brand span:not(.brand-mark) { margin-top: 1px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__brand-logo { width: 42px; max-height: 40px; flex: 0 0 auto; object-fit: contain; }
 .brand-mark { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border-radius: 12px; color: var(--brand-ink); background: var(--brand); font-size: 15px; font-weight: 800; }
-.sidebar__nav { min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px 14px; overflow-y: auto; }
+.sidebar__nav { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 22px 14px; overflow-y: auto; }
 .sidebar__nav-group { display: grid; gap: 3px; }
 .sidebar__nav-group--management { padding-top: 15px; border-top: 1px solid var(--line); }
 .sidebar__label { margin: 0 10px 7px; color: #94a0b1; font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
@@ -110,7 +110,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .erp-dashboard-link { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 0 11px; border-radius: 10px; color: #536176; font-size: 12px; font-weight: 700; }
 .erp-dashboard-link:hover { color: var(--ink); background: #f3f6f9; }
 .sidebar__mobile-close, .mobile-menu-button, .mobile-overlay { display: none; }
-.topbar { position: sticky; top: 0; z-index: 20; height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 clamp(18px,2.5vw,34px); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(14px); }
+.topbar { position: relative; z-index: 20; flex: 0 0 68px; height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 clamp(18px,2.5vw,34px); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(14px); }
 .global-search { width: min(500px,44vw); height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 11px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #f8fafc; }
 .global-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 13px; }
 .global-search kbd { min-width: 42px; padding: 3px 6px; border: 0; border-radius: 5px; color: #667085; background: #eef2f6; font-family: inherit; font-size: 10px; text-align: center; }
@@ -123,7 +123,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .user-menu > div { display: flex; flex-direction: column; }
 .user-menu strong { font-size: 12px; }
 .user-menu span { color: var(--muted); font-size: 10px; text-transform: capitalize; }
-.content { min-width: 0; min-height: calc(100vh - 68px); padding: var(--page-gap); overflow-x: hidden; }
+.content { min-width: 0; min-height: 0; flex: 1; padding: var(--page-gap); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 
 /* page surfaces */
 .page { width: 100%; max-width: 1360px; margin: 0 auto; }
@@ -551,8 +551,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width:640px) {
   :root { --page-gap: 14px; }
   .content { padding: 18px 14px; }
-  .topbar { height: 64px; padding-right: 12px; }
-  .content { min-height: calc(100vh - 64px); }
+  .topbar { flex-basis: 64px; height: 64px; padding-right: 12px; }
+  .content { min-height: 0; }
   .global-search { display: none; }
   .page-header, .dashboard-hero, .pipeline-page-header, .team-page-header, .directory-page-header, .settings-page-header { flex-direction: column; align-items: stretch; gap: 15px; margin-bottom: 18px; }
   .page-header h1, .dashboard-hero h1, .pipeline-page-header h1, .team-page-header h1, .directory-page-header h1, .settings-page-header h1 { font-size: 26px; }

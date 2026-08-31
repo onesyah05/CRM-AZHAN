@@ -144,8 +144,8 @@ interface ActivityRow extends RowDataPacket {
 }
 
 const leadSelect = `
-  SELECT BIN_TO_UUID(l.id) AS id, l.brand_id, BIN_TO_UUID(l.contact_id) AS contact_id,
-         BIN_TO_UUID(cv.id) AS conversation_id, c.display_name, c.phone_e164, c.email, c.city, c.source,
+  SELECT LOWER(CONCAT(SUBSTRING(HEX(l.id),1,8),'-',SUBSTRING(HEX(l.id),9,4),'-',SUBSTRING(HEX(l.id),13,4),'-',SUBSTRING(HEX(l.id),17,4),'-',SUBSTRING(HEX(l.id),21,12))) AS id, l.brand_id, LOWER(CONCAT(SUBSTRING(HEX(l.contact_id),1,8),'-',SUBSTRING(HEX(l.contact_id),9,4),'-',SUBSTRING(HEX(l.contact_id),13,4),'-',SUBSTRING(HEX(l.contact_id),17,4),'-',SUBSTRING(HEX(l.contact_id),21,12))) AS contact_id,
+         LOWER(CONCAT(SUBSTRING(HEX(cv.id),1,8),'-',SUBSTRING(HEX(cv.id),9,4),'-',SUBSTRING(HEX(cv.id),13,4),'-',SUBSTRING(HEX(cv.id),17,4),'-',SUBSTRING(HEX(cv.id),21,12))) AS conversation_id, c.display_name, c.phone_e164, c.email, c.city, c.source,
          s.stage_key, l.assignee_erp_user_id, l.assignee_name, l.erp_schedule_id, l.schedule_name, l.departure_plan,
          l.room_type, l.pax, l.estimated_value, l.next_follow_up_at, l.notes, l.deal_substatus,
          l.erp_jamaah_id, l.erp_booking_id, l.erp_payment_id, l.lost_reason, l.version, l.updated_at,l.created_at,
@@ -508,7 +508,7 @@ export class MySqlCrmStore {
 
   private async loadTags(brandId: number): Promise<Map<string, Tag[]>> {
     const [rows] = await this.pool.execute<TagRow[]>(
-      `SELECT BIN_TO_UUID(lt.lead_id) AS lead_id, t.id, t.name, t.color
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(lt.lead_id),1,8),'-',SUBSTRING(HEX(lt.lead_id),9,4),'-',SUBSTRING(HEX(lt.lead_id),13,4),'-',SUBSTRING(HEX(lt.lead_id),17,4),'-',SUBSTRING(HEX(lt.lead_id),21,12))) AS lead_id, t.id, t.name, t.color
          FROM crm_lead_tags lt
          JOIN crm_tags t ON t.id=lt.tag_id AND t.brand_id=lt.brand_id
         WHERE lt.brand_id=? ORDER BY t.name`,
@@ -530,7 +530,7 @@ export class MySqlCrmStore {
   async getLead(brandId: number, leadId: string): Promise<Lead | null> {
     await this.ensureBrand(brandId);
     const [rows] = await this.pool.execute<LeadRow[]>(
-      `${leadSelect} WHERE l.brand_id=? AND l.id=UUID_TO_BIN(?) AND l.deleted_at IS NULL LIMIT 1`,
+      `${leadSelect} WHERE l.brand_id=? AND l.id=UNHEX(REPLACE(?, '-', '')) AND l.deleted_at IS NULL LIMIT 1`,
       [brandId, leadId],
     );
     const row = rows[0];
@@ -556,13 +556,13 @@ export class MySqlCrmStore {
       await connection.execute(
         `UPDATE crm_contacts
             SET display_name=?, email=NULLIF(?, ''), city=NULLIF(?, ''), source=NULLIF(?, '')
-          WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
         [updates.name ?? current.name, updates.email ?? current.email, updates.city ?? current.city, updates.source ?? current.source, brandId, current.contactId],
       );
       const [result] = await connection.execute<ResultSetHeader>(
         `UPDATE crm_leads SET assignee_name=?, erp_schedule_id=?, schedule_name=?, departure_plan=?,
              room_type=?, pax=?, estimated_value=?, next_follow_up_at=?, notes=?, version=version+1
-          WHERE brand_id=? AND id=UUID_TO_BIN(?) AND version=? AND deleted_at IS NULL`,
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) AND version=? AND deleted_at IS NULL`,
         [
           updates.assignee ?? current.assignee,
           updates.scheduleId === undefined ? current.scheduleId : updates.scheduleId,
@@ -613,13 +613,13 @@ export class MySqlCrmStore {
       if (!stage) throw new Error('STAGE_NOT_FOUND');
       await connection.execute(
         `UPDATE crm_leads SET stage_id=?, lost_reason=?, version=version+1
-          WHERE brand_id=? AND id=UUID_TO_BIN(?) AND deleted_at IS NULL`,
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) AND deleted_at IS NULL`,
         [stage.id, stageId === 'lost' ? lostReason ?? null : null, brandId, leadId],
       );
       await connection.execute(
         `INSERT INTO crm_activities
            (id, brand_id, lead_id, activity_type, title, description, actor_name, occurred_at)
-         VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), 'stage', ?, ?, ?, UTC_TIMESTAMP(3))`,
+         VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')), 'stage', ?, ?, ?, UTC_TIMESTAMP(3))`,
         [randomUUID(), brandId, leadId, `${current.name} pindah ke ${stage.name}`, stageId === 'lost' ? lostReason ?? '' : 'Tahap pipeline diperbarui.', actor],
       );
       await this.insertAudit(connection, brandId, actor, 'lead', leadId, 'lead.stage.changed', { stageId: current.stageId }, { stageId, lostReason }, correlationId);
@@ -635,7 +635,7 @@ export class MySqlCrmStore {
 
   async listConversations(brandId: number, assigneeUserId?: number): Promise<Conversation[]> {
     const [rows] = await this.pool.execute<ConversationRow[]>(
-      `SELECT BIN_TO_UUID(cv.id) AS id, cv.brand_id, BIN_TO_UUID(cv.lead_id) AS lead_id,
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(cv.id),1,8),'-',SUBSTRING(HEX(cv.id),9,4),'-',SUBSTRING(HEX(cv.id),13,4),'-',SUBSTRING(HEX(cv.id),17,4),'-',SUBSTRING(HEX(cv.id),21,12))) AS id, cv.brand_id, LOWER(CONCAT(SUBSTRING(HEX(cv.lead_id),1,8),'-',SUBSTRING(HEX(cv.lead_id),9,4),'-',SUBSTRING(HEX(cv.lead_id),13,4),'-',SUBSTRING(HEX(cv.lead_id),17,4),'-',SUBSTRING(HEX(cv.lead_id),21,12))) AS lead_id,
               c.display_name, c.phone_e164, cv.last_message_preview, cv.last_message_at,
               cv.unread_count, l.assignee_erp_user_id, l.assignee_name
          FROM crm_conversations cv
@@ -666,14 +666,14 @@ export class MySqlCrmStore {
 
   async getConversationTransportContext(brandId: number, conversationId: string): Promise<{ phone: string; messageIds: string[] } | null> {
     const [conversations] = await this.pool.execute<ConversationTransportRow[]>(
-      `SELECT whatsapp_jid FROM crm_conversations WHERE brand_id=? AND id=UUID_TO_BIN(?) LIMIT 1`,
+      `SELECT whatsapp_jid FROM crm_conversations WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) LIMIT 1`,
       [brandId, conversationId],
     );
     const jid = conversations[0]?.whatsapp_jid;
     if (!jid) return null;
     const [messages] = await this.pool.execute<(RowDataPacket & { whatsapp_message_id: string })[]>(
       `SELECT whatsapp_message_id FROM crm_messages
-        WHERE brand_id=? AND conversation_id=UUID_TO_BIN(?) AND direction='inbound'
+        WHERE brand_id=? AND conversation_id=UNHEX(REPLACE(?, '-', '')) AND direction='inbound'
           AND status<>'read' AND whatsapp_message_id IS NOT NULL
         ORDER BY sent_at DESC LIMIT 500`,
       [brandId, conversationId],
@@ -689,7 +689,7 @@ export class MySqlCrmStore {
     const placeholders = messageIds.map(() => '?').join(',');
     await this.pool.execute(
       `UPDATE crm_messages SET status='read'
-        WHERE brand_id=? AND conversation_id=UUID_TO_BIN(?) AND direction='inbound'
+        WHERE brand_id=? AND conversation_id=UNHEX(REPLACE(?, '-', '')) AND direction='inbound'
           AND whatsapp_message_id IN (${placeholders})`,
       [brandId, conversationId, ...messageIds],
     );
@@ -700,20 +700,20 @@ export class MySqlCrmStore {
     try {
       await connection.beginTransaction();
       const [conversationRows] = await connection.execute<(IdRow & { lead_id: string })[]>(
-        `SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(lead_id) AS lead_id
-           FROM crm_conversations WHERE brand_id=? AND id=UUID_TO_BIN(?) FOR UPDATE`,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, LOWER(CONCAT(SUBSTRING(HEX(lead_id),1,8),'-',SUBSTRING(HEX(lead_id),9,4),'-',SUBSTRING(HEX(lead_id),13,4),'-',SUBSTRING(HEX(lead_id),17,4),'-',SUBSTRING(HEX(lead_id),21,12))) AS lead_id
+           FROM crm_conversations WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, conversationId],
       );
       if (!conversationRows[0]) {
         await connection.rollback();
         return null;
       }
-      await connection.execute('UPDATE crm_conversations SET unread_count=0 WHERE brand_id=? AND id=UUID_TO_BIN(?)', [brandId, conversationId]);
+      await connection.execute(`UPDATE crm_conversations SET unread_count=0 WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`, [brandId, conversationId]);
       const [rows] = await connection.execute<MessageRow[]>(
-        `SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(conversation_id) AS conversation_id,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, LOWER(CONCAT(SUBSTRING(HEX(conversation_id),1,8),'-',SUBSTRING(HEX(conversation_id),9,4),'-',SUBSTRING(HEX(conversation_id),13,4),'-',SUBSTRING(HEX(conversation_id),17,4),'-',SUBSTRING(HEX(conversation_id),21,12))) AS conversation_id,
 				whatsapp_message_id,direction,message_type,body,status,sent_at,
 				media_object_key,media_mime_type,media_file_name
-           FROM crm_messages WHERE brand_id=? AND conversation_id=UUID_TO_BIN(?) ORDER BY sent_at`,
+           FROM crm_messages WHERE brand_id=? AND conversation_id=UNHEX(REPLACE(?, '-', '')) ORDER BY sent_at`,
         [brandId, conversationId],
       );
       await connection.commit();
@@ -731,7 +731,7 @@ export class MySqlCrmStore {
       `SELECT 1 AS id FROM crm_messages m
        JOIN crm_conversations cv ON cv.id=m.conversation_id AND cv.brand_id=m.brand_id
        JOIN crm_leads l ON l.id=cv.lead_id AND l.brand_id=cv.brand_id
-       WHERE m.brand_id=? AND m.id=UUID_TO_BIN(?) AND l.assignee_erp_user_id=? LIMIT 1`,
+       WHERE m.brand_id=? AND m.id=UNHEX(REPLACE(?, '-', '')) AND l.assignee_erp_user_id=? LIMIT 1`,
       [brandId, messageId, assigneeUserId],
     );
     return Boolean(rows[0]);
@@ -749,14 +749,14 @@ export class MySqlCrmStore {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO crm_messages
          (id, brand_id, conversation_id, whatsapp_message_id, direction, message_type, body, status, sent_at)
-       SELECT UUID_TO_BIN(?), ?, id, ?, 'outbound', 'text', ?, ?, ?
-         FROM crm_conversations WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+       SELECT UNHEX(REPLACE(?, '-', '')), ?, id, ?, 'outbound', 'text', ?, ?, ?
+         FROM crm_conversations WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
       [localId, brandId, whatsappMessageId, body, status, sentAt.slice(0, 23).replace('T', ' '), brandId, conversationId],
     );
     if (!result.affectedRows) return null;
     await this.pool.execute(
       `UPDATE crm_conversations SET last_message_preview=?, last_message_at=?
-        WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+        WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
       [body, sentAt.slice(0, 23).replace('T', ' '), brandId, conversationId],
     );
     return { id: localId, conversationId, direction: 'outbound', type: 'text', body, sentAt, status };
@@ -771,7 +771,7 @@ export class MySqlCrmStore {
       await connection.beginTransaction();
       const [rows] = await connection.execute<(RowDataPacket & { phone_e164: string })[]>(
         `SELECT c.phone_e164 FROM crm_conversations cv JOIN crm_contacts c ON c.id=cv.contact_id
-          WHERE cv.brand_id=? AND cv.id=UUID_TO_BIN(?) FOR UPDATE`,
+          WHERE cv.brand_id=? AND cv.id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, conversationId],
       );
       const phone = rows[0]?.phone_e164;
@@ -782,17 +782,17 @@ export class MySqlCrmStore {
       await connection.execute(
         `INSERT INTO crm_messages
            (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,status,sent_at)
-         VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,'outbound','text',?,'pending',?)`,
+         VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),?,'outbound','text',?,'pending',?)`,
         [messageId, brandId, conversationId, messageId, body, sentAt.slice(0, 23).replace('T', ' ')],
       );
       await connection.execute(
         `INSERT INTO crm_outbox_jobs
            (id,brand_id,job_type,dedupe_key,payload,status,available_at)
-         VALUES (UUID_TO_BIN(?),?,'whatsapp.send',?,?, 'pending',UTC_TIMESTAMP(3))`,
+         VALUES (UNHEX(REPLACE(?, '-', '')),?,'whatsapp.send',?,?, 'pending',UTC_TIMESTAMP(3))`,
         [jobId, brandId, messageId, JSON.stringify({ messageId, conversationId, phone, body })],
       );
       await connection.execute(
-        `UPDATE crm_conversations SET last_message_preview=?,last_message_at=? WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+        `UPDATE crm_conversations SET last_message_preview=?,last_message_at=? WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
         [body, sentAt.slice(0, 23).replace('T', ' '), brandId, conversationId],
       );
       await connection.commit();
@@ -817,7 +817,7 @@ export class MySqlCrmStore {
       await connection.beginTransaction();
       const [rows] = await connection.execute<(RowDataPacket & { phone_e164: string })[]>(
         `SELECT c.phone_e164 FROM crm_conversations cv JOIN crm_contacts c ON c.id=cv.contact_id
-          WHERE cv.brand_id=? AND cv.id=UUID_TO_BIN(?) FOR UPDATE`,
+          WHERE cv.brand_id=? AND cv.id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, conversationId],
       );
       const phone = rows[0]?.phone_e164;
@@ -828,17 +828,17 @@ export class MySqlCrmStore {
       await connection.execute(
         `INSERT INTO crm_messages
            (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,media_object_key,media_mime_type,media_file_name,status,sent_at)
-         VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,'outbound',?,?,?,?,?,'pending',?)`,
+         VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),?,'outbound',?,?,?,?,?,'pending',?)`,
         [messageId, brandId, conversationId, messageId, input.type, input.body, input.mediaObjectKey,
           input.mimeType, input.fileName, sentAt.slice(0, 23).replace('T', ' ')],
       );
       await connection.execute(
         `INSERT INTO crm_outbox_jobs (id,brand_id,job_type,dedupe_key,payload,status,available_at)
-         VALUES (UUID_TO_BIN(?),?,'whatsapp.send',?,?,'pending',UTC_TIMESTAMP(3))`,
+         VALUES (UNHEX(REPLACE(?, '-', '')),?,'whatsapp.send',?,?,'pending',UTC_TIMESTAMP(3))`,
         [randomUUID(), brandId, messageId, JSON.stringify({ messageId, conversationId, phone, ...input })],
       );
       await connection.execute(
-        `UPDATE crm_conversations SET last_message_preview=?,last_message_at=? WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+        `UPDATE crm_conversations SET last_message_preview=?,last_message_at=? WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
         [input.body || input.fileName, sentAt.slice(0, 23).replace('T', ' '), brandId, conversationId],
       );
       await connection.commit();
@@ -866,14 +866,14 @@ export class MySqlCrmStore {
       const [rows] = await connection.execute<(RowDataPacket & {
         id: string; brand_id: number; attempts: number; payload: OutboundMessageJob['payload'] | string;
       })[]>(
-        `SELECT BIN_TO_UUID(id) AS id,brand_id,attempts,payload FROM crm_outbox_jobs
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id,brand_id,attempts,payload FROM crm_outbox_jobs
           WHERE job_type='whatsapp.send' AND status='pending' AND available_at<=UTC_TIMESTAMP(3)
           ORDER BY available_at,id LIMIT ? FOR UPDATE SKIP LOCKED`,
         [limit],
       );
       for (const row of rows) {
         await connection.execute(
-          `UPDATE crm_outbox_jobs SET status='processing',locked_at=UTC_TIMESTAMP(3),locked_by=? WHERE id=UUID_TO_BIN(?)`,
+          `UPDATE crm_outbox_jobs SET status='processing',locked_at=UTC_TIMESTAMP(3),locked_by=? WHERE id=UNHEX(REPLACE(?, '-', ''))`,
           [workerId, row.id],
         );
       }
@@ -895,11 +895,11 @@ export class MySqlCrmStore {
   async completeOutboundJob(job: OutboundMessageJob): Promise<Message | null> {
     await this.pool.execute(
       `UPDATE crm_outbox_jobs SET status='completed',attempts=attempts+1,locked_at=NULL,locked_by=NULL,last_error=NULL
-        WHERE id=UUID_TO_BIN(?)`,
+        WHERE id=UNHEX(REPLACE(?, '-', ''))`,
       [job.id],
     );
     await this.pool.execute(
-      `UPDATE crm_messages SET status='sent',failure_code=NULL WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+      `UPDATE crm_messages SET status='sent',failure_code=NULL WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
       [job.brandId, job.payload.messageId],
     );
     return this.getMessageById(job.brandId, job.payload.messageId);
@@ -911,11 +911,11 @@ export class MySqlCrmStore {
     const delaySeconds = Math.min(300, 2 ** attempts * 3) + Math.floor(Math.random() * 4);
     await this.pool.execute(
       `UPDATE crm_outbox_jobs SET status=?,attempts=?,available_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL ? SECOND),
-              locked_at=NULL,locked_by=NULL,last_error=? WHERE id=UUID_TO_BIN(?)`,
+              locked_at=NULL,locked_by=NULL,last_error=? WHERE id=UNHEX(REPLACE(?, '-', ''))`,
       [permanent ? 'failed' : 'pending', attempts, delaySeconds, error.slice(0, 1_000), job.id],
     );
     await this.pool.execute(
-      `UPDATE crm_messages SET status=?,failure_code=? WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+      `UPDATE crm_messages SET status=?,failure_code=? WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
       [permanent ? 'failed' : 'pending', permanent ? 'MAX_RETRIES_EXCEEDED' : null, job.brandId, job.payload.messageId],
     );
     return this.getMessageById(job.brandId, job.payload.messageId);
@@ -924,7 +924,7 @@ export class MySqlCrmStore {
   async deferOutboundJob(jobId: string, delaySeconds = 10): Promise<void> {
     await this.pool.execute(
       `UPDATE crm_outbox_jobs SET status='pending',available_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL ? SECOND),
-              locked_at=NULL,locked_by=NULL WHERE id=UUID_TO_BIN(?)`,
+              locked_at=NULL,locked_by=NULL WHERE id=UNHEX(REPLACE(?, '-', ''))`,
       [delaySeconds, jobId],
     );
   }
@@ -934,8 +934,8 @@ export class MySqlCrmStore {
     try {
       await connection.beginTransaction();
       const [rows] = await connection.execute<IdRow[]>(
-        `SELECT BIN_TO_UUID(id) AS id FROM crm_messages
-          WHERE brand_id=? AND id=UUID_TO_BIN(?) AND direction='outbound' AND status='failed' FOR UPDATE`,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id FROM crm_messages
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) AND direction='outbound' AND status='failed' FOR UPDATE`,
         [brandId, messageId],
       );
       if (!rows[0]) {
@@ -953,7 +953,7 @@ export class MySqlCrmStore {
         return null;
       }
       await connection.execute(
-        `UPDATE crm_messages SET status='pending',failure_code=NULL WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+        `UPDATE crm_messages SET status='pending',failure_code=NULL WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
         [brandId, messageId],
       );
       await connection.commit();
@@ -976,10 +976,10 @@ export class MySqlCrmStore {
 
   private async getMessageById(brandId: number, messageId: string): Promise<Message | null> {
     const [rows] = await this.pool.execute<MessageRow[]>(
-      `SELECT BIN_TO_UUID(id) AS id,BIN_TO_UUID(conversation_id) AS conversation_id,
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id,LOWER(CONCAT(SUBSTRING(HEX(conversation_id),1,8),'-',SUBSTRING(HEX(conversation_id),9,4),'-',SUBSTRING(HEX(conversation_id),13,4),'-',SUBSTRING(HEX(conversation_id),17,4),'-',SUBSTRING(HEX(conversation_id),21,12))) AS conversation_id,
 			  whatsapp_message_id,direction,message_type,body,status,sent_at,
 			  media_object_key,media_mime_type,media_file_name
-         FROM crm_messages WHERE brand_id=? AND id=UUID_TO_BIN(?) LIMIT 1`,
+         FROM crm_messages WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) LIMIT 1`,
       [brandId, messageId],
     );
     return rows[0] ? mapMessage(rows[0]) : null;
@@ -1013,8 +1013,8 @@ export class MySqlCrmStore {
     try {
       await connection.beginTransaction();
       const [duplicateRows] = await connection.execute<(MessageRow & { lead_id: string })[]>(
-        `SELECT BIN_TO_UUID(m.id) AS id, BIN_TO_UUID(m.conversation_id) AS conversation_id,
-                BIN_TO_UUID(cv.lead_id) AS lead_id, m.whatsapp_message_id, m.direction,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(m.id),1,8),'-',SUBSTRING(HEX(m.id),9,4),'-',SUBSTRING(HEX(m.id),13,4),'-',SUBSTRING(HEX(m.id),17,4),'-',SUBSTRING(HEX(m.id),21,12))) AS id, LOWER(CONCAT(SUBSTRING(HEX(m.conversation_id),1,8),'-',SUBSTRING(HEX(m.conversation_id),9,4),'-',SUBSTRING(HEX(m.conversation_id),13,4),'-',SUBSTRING(HEX(m.conversation_id),17,4),'-',SUBSTRING(HEX(m.conversation_id),21,12))) AS conversation_id,
+                LOWER(CONCAT(SUBSTRING(HEX(cv.lead_id),1,8),'-',SUBSTRING(HEX(cv.lead_id),9,4),'-',SUBSTRING(HEX(cv.lead_id),13,4),'-',SUBSTRING(HEX(cv.lead_id),17,4),'-',SUBSTRING(HEX(cv.lead_id),21,12))) AS lead_id, m.whatsapp_message_id, m.direction,
 				m.message_type,m.body,m.status,m.sent_at,m.media_object_key,m.media_mime_type,m.media_file_name
            FROM crm_messages m
            JOIN crm_conversations cv ON cv.id=m.conversation_id AND cv.brand_id=m.brand_id
@@ -1030,19 +1030,19 @@ export class MySqlCrmStore {
         const contactId = randomUUID();
         await connection.execute(
           `INSERT INTO crm_contacts (id, brand_id, phone_e164, display_name, source)
-           VALUES (UUID_TO_BIN(?), ?, ?, ?, 'WhatsApp')
+           VALUES (UNHEX(REPLACE(?, '-', '')), ?, ?, ?, 'WhatsApp')
            ON DUPLICATE KEY UPDATE display_name=IF(display_name='', VALUES(display_name), display_name)`,
           [contactId, input.brandId, input.phone, input.name || input.phone],
         );
         const [contactRows] = await connection.execute<(IdRow & { display_name: string })[]>(
-          'SELECT BIN_TO_UUID(id) AS id, display_name FROM crm_contacts WHERE brand_id=? AND phone_e164=? LIMIT 1',
+          `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, display_name FROM crm_contacts WHERE brand_id=? AND phone_e164=? LIMIT 1`,
           [input.brandId, input.phone],
         );
         const contact = contactRows[0];
         if (!contact) throw new Error('CONTACT_CREATE_FAILED');
         const jid = input.jid ?? `${input.phone.replace(/\D/g, '')}@s.whatsapp.net`;
         const [conversationRows] = await connection.execute<(IdRow & { lead_id: string })[]>(
-          `SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(lead_id) AS lead_id
+          `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, LOWER(CONCAT(SUBSTRING(HEX(lead_id),1,8),'-',SUBSTRING(HEX(lead_id),9,4),'-',SUBSTRING(HEX(lead_id),13,4),'-',SUBSTRING(HEX(lead_id),17,4),'-',SUBSTRING(HEX(lead_id),21,12))) AS lead_id
              FROM crm_conversations WHERE brand_id=? AND whatsapp_jid=? LIMIT 1 FOR UPDATE`,
           [input.brandId, jid],
         );
@@ -1063,20 +1063,20 @@ export class MySqlCrmStore {
           await connection.execute(
             `INSERT INTO crm_leads
                (id, brand_id, contact_id, stage_id, assignee_erp_user_id, assignee_name, room_type, pax, estimated_value)
-             VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), ?, ?, ?, 'Quad', 1, 0)`,
+             VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')), ?, ?, ?, 'Quad', 1, 0)`,
             [leadId, input.brandId, String(contact.id), stageId, assignee?.userId ?? null, assignee?.name ?? 'Belum ditugaskan'],
           );
           await connection.execute(
             `INSERT INTO crm_conversations
                (id, brand_id, contact_id, lead_id, whatsapp_jid, last_message_preview, last_message_at, unread_count)
-             VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), UUID_TO_BIN(?), ?, '', NULL, 0)`,
+             VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')), UNHEX(REPLACE(?, '-', '')), ?, '', NULL, 0)`,
             [conversationId, input.brandId, String(contact.id), leadId, jid],
           );
 		  if (!historical) {
 			await connection.execute(
 			  `INSERT INTO crm_activities
 				 (id, brand_id, lead_id, activity_type, title, description, actor_name, occurred_at)
-			   VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), 'message', ?, 'Lead dibuat otomatis dari percakapan pertama.', 'WhatsApp', ?)`,
+			   VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')), 'message', ?, 'Lead dibuat otomatis dari percakapan pertama.', 'WhatsApp', ?)`,
 			  [randomUUID(), input.brandId, leadId, `Pesan baru dari ${input.name || input.phone}`, toSqlDate(input.occurredAt)],
 			);
 		  }
@@ -1084,7 +1084,7 @@ export class MySqlCrmStore {
             await connection.execute(
               `INSERT INTO crm_activities
                  (id, brand_id, lead_id, activity_type, title, description, actor_erp_user_id, actor_name, occurred_at)
-               VALUES (UUID_TO_BIN(?), ?, UUID_TO_BIN(?), 'assignment', ?, 'Lead dibagikan otomatis sesuai rotasi.', ?, 'Sistem', ?)`,
+               VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')), 'assignment', ?, 'Lead dibagikan otomatis sesuai rotasi.', ?, 'Sistem', ?)`,
               [randomUUID(), input.brandId, leadId, `Lead ditugaskan ke ${assignee.name}`, assignee.userId, toSqlDate(input.occurredAt)],
             );
           }
@@ -1093,7 +1093,7 @@ export class MySqlCrmStore {
         const [insertResult] = await connection.execute<ResultSetHeader>(
           `INSERT IGNORE INTO crm_messages
 			 (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,media_object_key,media_mime_type,media_file_name,status,sent_at)
-		   VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,?,?,?,?,?,?, ?,?)`,
+		   VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),?,?,?,?,?,?,?, ?,?)`,
 		  [localMessageId,input.brandId,conversationId,input.messageId,direction,input.type ?? 'text',input.body,
 			input.mediaObjectKey ?? null,input.mediaMimeType ?? null,input.mediaFileName ?? null,messageStatus,toSqlDate(input.occurredAt)],
         );
@@ -1102,13 +1102,13 @@ export class MySqlCrmStore {
           await connection.execute(
             `UPDATE crm_conversations
 				SET last_message_preview=?, last_message_at=?, unread_count=unread_count+?
-			  WHERE brand_id=? AND id=UUID_TO_BIN(?)
+			  WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))
 				AND (last_message_at IS NULL OR last_message_at<=?)`,
 			[input.body, toSqlDate(input.occurredAt), direction === 'inbound' && !historical ? 1 : 0,
 			  input.brandId, conversationId, toSqlDate(input.occurredAt)],
           );
           await connection.execute(
-			'UPDATE crm_leads SET updated_at=GREATEST(updated_at,?) WHERE brand_id=? AND id=UUID_TO_BIN(?)',
+			`UPDATE crm_leads SET updated_at=GREATEST(updated_at,?) WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
             [toSqlDate(input.occurredAt), input.brandId, leadId],
           );
         }
@@ -1131,7 +1131,7 @@ export class MySqlCrmStore {
 
   private async getMessageByWhatsappId(brandId: number, messageId: string): Promise<Message | null> {
     const [rows] = await this.pool.execute<MessageRow[]>(
-      `SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(conversation_id) AS conversation_id,
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, LOWER(CONCAT(SUBSTRING(HEX(conversation_id),1,8),'-',SUBSTRING(HEX(conversation_id),9,4),'-',SUBSTRING(HEX(conversation_id),13,4),'-',SUBSTRING(HEX(conversation_id),17,4),'-',SUBSTRING(HEX(conversation_id),21,12))) AS conversation_id,
 			  whatsapp_message_id,direction,message_type,body,status,sent_at,
 			  media_object_key,media_mime_type,media_file_name
          FROM crm_messages WHERE brand_id=? AND whatsapp_message_id=? LIMIT 1`,
@@ -1145,7 +1145,7 @@ export class MySqlCrmStore {
 	  object_key: string; mime_type: string | null; file_name: string | null;
 	})[]>(
 	  `SELECT media_object_key AS object_key,media_mime_type AS mime_type,media_file_name AS file_name
-		 FROM crm_messages WHERE brand_id=? AND id=UUID_TO_BIN(?) AND media_object_key IS NOT NULL LIMIT 1`,
+		 FROM crm_messages WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) AND media_object_key IS NOT NULL LIMIT 1`,
 	  [brandId, messageId],
 	);
 	const row = rows[0];
@@ -1160,8 +1160,8 @@ export class MySqlCrmStore {
     try {
       await connection.beginTransaction();
       const [leadRows] = await connection.execute<IdRow[]>(
-        `SELECT BIN_TO_UUID(id) AS id FROM crm_leads
-          WHERE brand_id=? AND id=UUID_TO_BIN(?) AND deleted_at IS NULL FOR UPDATE`,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id FROM crm_leads
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) AND deleted_at IS NULL FOR UPDATE`,
         [brandId, leadId],
       );
       if (!leadRows[0]) {
@@ -1174,8 +1174,8 @@ export class MySqlCrmStore {
         status: string;
         request_payload: DealRequest | string;
       })[]>(
-        `SELECT BIN_TO_UUID(id) AS id,idempotency_key,status,request_payload
-           FROM crm_deal_conversions WHERE brand_id=? AND lead_id=UUID_TO_BIN(?) FOR UPDATE`,
+        `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id,idempotency_key,status,request_payload
+           FROM crm_deal_conversions WHERE brand_id=? AND lead_id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, leadId],
       );
       const existing = rows[0];
@@ -1190,7 +1190,7 @@ export class MySqlCrmStore {
         if (!completed) {
           await connection.execute(
             `UPDATE crm_deal_conversions SET status='pending',retry_count=retry_count+1,
-                    last_error_code=NULL,last_error_message=NULL WHERE id=UUID_TO_BIN(?)`,
+                    last_error_code=NULL,last_error_message=NULL WHERE id=UNHEX(REPLACE(?, '-', ''))`,
             [conversionId],
           );
         }
@@ -1198,7 +1198,7 @@ export class MySqlCrmStore {
         await connection.execute(
           `INSERT INTO crm_deal_conversions
              (id,brand_id,lead_id,idempotency_key,commitment_type,status,request_payload)
-           VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),?,?,'pending',?)`,
+           VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),?,?,'pending',?)`,
           [conversionId, brandId, leadId, idempotencyKey, request.commitmentType, stableJson(request)],
         );
       }
@@ -1235,7 +1235,7 @@ export class MySqlCrmStore {
       await connection.beginTransaction();
       const [conversionRows] = await connection.execute<(RowDataPacket & { status: string })[]>(
         `SELECT status FROM crm_deal_conversions
-          WHERE id=UUID_TO_BIN(?) AND brand_id=? AND lead_id=UUID_TO_BIN(?) AND idempotency_key=? FOR UPDATE`,
+          WHERE id=UNHEX(REPLACE(?, '-', '')) AND brand_id=? AND lead_id=UNHEX(REPLACE(?, '-', '')) AND idempotency_key=? FOR UPDATE`,
         [conversionId, brandId, leadId, idempotencyKey],
       );
       if (!conversionRows[0]) throw new DealConflictError('DEAL_ALREADY_EXISTS');
@@ -1249,26 +1249,26 @@ export class MySqlCrmStore {
       await connection.execute(
         `UPDATE crm_deal_conversions SET status='completed',response_payload=?,erp_jamaah_id=?,
                 erp_booking_id=?,erp_payment_id=?,last_error_code=NULL,last_error_message=NULL
-          WHERE id=UUID_TO_BIN(?)`,
+          WHERE id=UNHEX(REPLACE(?, '-', ''))`,
         [JSON.stringify(erpResult), erpResult.jamaah_id, erpResult.booking_id, erpResult.payment_id ?? null, conversionId],
       );
       await connection.execute(
         `UPDATE crm_leads SET stage_id=?,erp_schedule_id=?,room_type=?,pax=?,deal_substatus=?,
                 seat_hold_expires_at=?,erp_jamaah_id=?,erp_booking_id=?,erp_payment_id=?,version=version+1
-          WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
         [dealStageId, request.scheduleId, request.roomType, request.pax, erpResult.deal_substatus,
           toSqlDate(erpResult.seat_hold_expires_at ?? ''), erpResult.jamaah_id, erpResult.booking_id,
           erpResult.payment_id ?? null, brandId, leadId],
       );
       await connection.execute(
         `UPDATE crm_contacts c JOIN crm_leads l ON l.contact_id=c.id
-            SET c.erp_jamaah_id=? WHERE c.brand_id=? AND l.id=UUID_TO_BIN(?)`,
+            SET c.erp_jamaah_id=? WHERE c.brand_id=? AND l.id=UNHEX(REPLACE(?, '-', ''))`,
         [erpResult.jamaah_id, brandId, leadId],
       );
       await connection.execute(
         `INSERT INTO crm_activities
            (id,brand_id,lead_id,activity_type,title,description,actor_name,occurred_at)
-         VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),'deal','Deal berhasil diproses',?,?,UTC_TIMESTAMP(3))`,
+         VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),'deal','Deal berhasil diproses',?,?,UTC_TIMESTAMP(3))`,
         [randomUUID(), brandId, leadId, `Booking ERP #${erpResult.booking_code} dibuat dengan komitmen ${request.commitmentType}.`, actor],
       );
       await this.insertAudit(connection, brandId, actor, 'deal_conversion', conversionId, 'deal.completed', request, erpResult, correlationId);
@@ -1287,7 +1287,7 @@ export class MySqlCrmStore {
   async failDeal(conversionId: string, code: string, message: string): Promise<void> {
     await this.pool.execute(
       `UPDATE crm_deal_conversions SET status='requires_retry',last_error_code=?,last_error_message=?
-        WHERE id=UUID_TO_BIN(?) AND status<>'completed'`,
+        WHERE id=UNHEX(REPLACE(?, '-', '')) AND status<>'completed'`,
       [code.slice(0, 100), message.slice(0, 1_000), conversionId],
     );
   }
@@ -1311,7 +1311,7 @@ export class MySqlCrmStore {
       await connection.beginTransaction();
       const [rows] = await connection.execute<(RowDataPacket & { deal_substatus: Lead['dealSubstatus']; erp_payment_id: number | null })[]>(
         `SELECT deal_substatus,erp_payment_id FROM crm_leads
-          WHERE brand_id=? AND id=UUID_TO_BIN(?) FOR UPDATE`,
+          WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, leadId],
       );
       const current = rows[0];
@@ -1322,7 +1322,7 @@ export class MySqlCrmStore {
       if (current.deal_substatus !== nextSubstatus) {
         await connection.execute(
           `UPDATE crm_leads SET deal_substatus=?,erp_payment_id=?,version=version+1
-            WHERE brand_id=? AND id=UUID_TO_BIN(?)`,
+            WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
           [nextSubstatus, paymentId, brandId, leadId],
         );
         const description = paymentStatus === 'confirmed'
@@ -1333,7 +1333,7 @@ export class MySqlCrmStore {
         await connection.execute(
           `INSERT INTO crm_activities
              (id,brand_id,lead_id,activity_type,title,description,actor_name,occurred_at)
-           VALUES (UUID_TO_BIN(?),?,UUID_TO_BIN(?),'deal',?,?,?,UTC_TIMESTAMP(3))`,
+           VALUES (UNHEX(REPLACE(?, '-', '')),?,UNHEX(REPLACE(?, '-', '')),'deal',?,?,?,UTC_TIMESTAMP(3))`,
           [randomUUID(), brandId, leadId, paymentStatus === 'confirmed' ? 'DP terkonfirmasi' : paymentStatus === 'rejected' ? 'DP ditolak' : 'DP menunggu verifikasi', description, actor],
         );
         await this.insertAudit(connection, brandId, actor, 'lead', leadId, 'payment.status_synced', current.deal_substatus, nextSubstatus, correlationId);
@@ -1357,8 +1357,8 @@ export class MySqlCrmStore {
     const deals = leads.filter((lead) => lead.stageId === 'deal' && changedInPeriod(lead)).length;
     const lost = leads.filter((lead) => lead.stageId === 'lost' && changedInPeriod(lead)).length;
     const [activityRows] = await this.pool.execute<ActivityRow[]>(
-      `SELECT BIN_TO_UUID(id) AS id, activity_type, title, description, actor_name, occurred_at,
-              BIN_TO_UUID(lead_id) AS lead_id
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, activity_type, title, description, actor_name, occurred_at,
+              LOWER(CONCAT(SUBSTRING(HEX(lead_id),1,8),'-',SUBSTRING(HEX(lead_id),9,4),'-',SUBSTRING(HEX(lead_id),13,4),'-',SUBSTRING(HEX(lead_id),17,4),'-',SUBSTRING(HEX(lead_id),21,12))) AS lead_id
          FROM crm_activities a WHERE a.brand_id=? ${cutoff ? 'AND a.occurred_at>=?' : ''}
               ${assigneeUserId ? 'AND EXISTS (SELECT 1 FROM crm_leads l WHERE l.id=a.lead_id AND l.brand_id=a.brand_id AND l.assignee_erp_user_id=?)' : ''}
          ORDER BY a.occurred_at DESC LIMIT 5`,
@@ -1405,8 +1405,8 @@ export class MySqlCrmStore {
   async listActivities(brandId: number, limit = 100, assigneeUserId?: number): Promise<Activity[]> {
     const safeLimit = Math.max(1, Math.min(Math.trunc(limit), 200));
     const [rows] = await this.pool.execute<ActivityRow[]>(
-      `SELECT BIN_TO_UUID(id) AS id, activity_type, title, description, actor_name, occurred_at,
-              BIN_TO_UUID(lead_id) AS lead_id
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(id),1,8),'-',SUBSTRING(HEX(id),9,4),'-',SUBSTRING(HEX(id),13,4),'-',SUBSTRING(HEX(id),17,4),'-',SUBSTRING(HEX(id),21,12))) AS id, activity_type, title, description, actor_name, occurred_at,
+              LOWER(CONCAT(SUBSTRING(HEX(lead_id),1,8),'-',SUBSTRING(HEX(lead_id),9,4),'-',SUBSTRING(HEX(lead_id),13,4),'-',SUBSTRING(HEX(lead_id),17,4),'-',SUBSTRING(HEX(lead_id),21,12))) AS lead_id
          FROM crm_activities a WHERE a.brand_id=?
               ${assigneeUserId ? 'AND EXISTS (SELECT 1 FROM crm_leads l WHERE l.id=a.lead_id AND l.brand_id=a.brand_id AND l.assignee_erp_user_id=?)' : ''}
          ORDER BY a.occurred_at DESC LIMIT ${safeLimit}`,
@@ -1437,7 +1437,7 @@ export class MySqlCrmStore {
     await connection.execute(
       `INSERT INTO crm_audit_logs
          (id, brand_id, actor_name, entity_type, entity_id, action, before_payload, after_payload, correlation_id)
-       VALUES (UUID_TO_BIN(?), ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (UNHEX(REPLACE(?, '-', '')), ?, ?, ?, ?, ?, ?, ?, ?)`,
       [randomUUID(), brandId, actor, entityType, entityId, action, JSON.stringify(before), JSON.stringify(after), correlationId ?? null],
     );
   }

@@ -150,7 +150,7 @@ describe('MySqlCrmStore', () => {
     const lost = await store.moveLead(101, lead!.id, 'lost', 'Tester', 'Jadwal belum cocok');
     expect(lost?.stageId).toBe('lost');
     const [rows] = await pool.execute<(RowDataPacket & { lost_reason: string })[]>(
-      'SELECT lost_reason FROM crm_leads WHERE brand_id=? AND id=UUID_TO_BIN(?)',
+      `SELECT lost_reason FROM crm_leads WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
       [101, lead!.id],
     );
     expect(rows[0]?.lost_reason).toBe('Jadwal belum cocok');
@@ -194,7 +194,7 @@ describe('MySqlCrmStore', () => {
     const replay = await store.prepareDeal(101, lead!.id, request, key);
     expect(replay?.replay?.lead.erpBookingId).toBe(9012);
     const [rows] = await pool.execute<(RowDataPacket & { count: number })[]>(
-      'SELECT COUNT(*) AS count FROM crm_deal_conversions WHERE brand_id=? AND lead_id=UUID_TO_BIN(?)',
+      `SELECT COUNT(*) AS count FROM crm_deal_conversions WHERE brand_id=? AND lead_id=UNHEX(REPLACE(?, '-', ''))`,
       [101, lead!.id],
     );
     expect(Number(rows[0]?.count)).toBe(1);

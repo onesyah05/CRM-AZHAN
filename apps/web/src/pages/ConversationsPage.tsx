@@ -208,6 +208,16 @@ export function ConversationsPage({ user }: { user: UserContext }) {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['messages', selectedId] }),
   });
 
+	const messageStatusLabel = (status: Message['status']): string => {
+	  switch (status) {
+		case 'pending': return 'Menunggu dikirim';
+		case 'sent': return 'Terkirim';
+		case 'delivered': return 'Diterima';
+		case 'read': return 'Dibaca';
+		case 'failed': return 'Gagal';
+	  }
+	};
+
 	const statusIcon = (message: Message) => message.status === 'failed'
 	  ? <AlertCircle size={14} />
 	  : message.status === 'pending'
@@ -278,7 +288,16 @@ export function ConversationsPage({ user }: { user: UserContext }) {
 				        <div className="message-bubble">
 				          <MessageAttachment message={message} onLoad={scrollToLatest} />
 				          {message.body && !genericMediaBody ? <p>{message.body}</p> : null}
-				          <span>{messageTime(message.sentAt)}{message.direction === 'outbound' ? statusIcon(message) : null}</span>
+		                  <span className="message-meta">
+							<time>{messageTime(message.sentAt)}</time>
+							{message.direction === 'outbound' ? <span
+								className={`message-status message-status--${message.status}`}
+								title={`Status pesan: ${messageStatusLabel(message.status)}`}
+								aria-label={`Status pesan: ${messageStatusLabel(message.status)}`}
+							>
+								{statusIcon(message)}<small>{messageStatusLabel(message.status)}</small>
+							</span> : null}
+						  </span>
 				          {message.status === 'failed' ? <button className="message-retry" onClick={() => retryMutation.mutate(message.id)}>Coba lagi</button> : null}
 				        </div>
                       </div>

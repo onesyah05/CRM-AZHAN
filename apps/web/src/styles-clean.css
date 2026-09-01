@@ -292,7 +292,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .message-bubble { max-width: min(520px,78%); padding: 10px 12px 6px; border-radius: 6px 15px 15px 15px; background: #fff; box-shadow: var(--shadow); }
 .message-bubble-wrap--outbound .message-bubble { border-radius: 15px 6px 15px 15px; background: color-mix(in srgb, var(--brand) 10%, #fff); }
 .message-bubble p { margin: 0; font-size: 12px; line-height: 1.5; }
-.message-bubble > span { display: flex; justify-content: flex-end; align-items: center; gap: 3px; margin-top: 3px; color: var(--faint); font-size: 8px; }
+.message-bubble > .message-meta { display: flex; justify-content: flex-end; align-items: center; gap: 7px; margin-top: 5px; color: var(--faint); font-size: 8px; }
+.message-meta time { font-variant-numeric: tabular-nums; }
+.message-status { display: inline-flex; align-items: center; gap: 3px; font-size: 8px; font-weight: 750; white-space: nowrap; }
+.message-status small { font-size: inherit; }
+.message-status--pending { color: var(--warning); }
+.message-status--sent { color: var(--muted); }
+.message-status--delivered { color: #64748b; }
+.message-status--read { color: var(--brand); }
+.message-status--failed { color: var(--danger); }
 .message-media-image { display: block; width: min(340px,100%); max-height: 360px; margin-bottom: 7px; border-radius: 9px; object-fit: cover; }
 .message-media-video { display: block; width: min(420px,100%); max-height: 420px; margin-bottom: 7px; border-radius: 9px; background: #0f172a; }
 .message-media-audio { display: block; width: min(340px,100%); margin-bottom: 7px; }

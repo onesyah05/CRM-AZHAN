@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import type { Message } from '@azhan-crm/contracts';
 import { AppShell } from './components/AppShell';
 import { ErrorState, LoadingState } from './components/ui';
 import { api, ApiClientError } from './api';
@@ -33,7 +34,13 @@ function AuthenticatedApp() {
         void queryClient.invalidateQueries({ queryKey: ['contacts'] });
         void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       });
-      socket.on('message.status.updated', () => {
+	  socket.on('message.status.updated', (updated: Message) => {
+		// Apply the receipt immediately so the tick/label changes without
+		// waiting for the next HTTP refetch. The refetch below keeps other
+		// conversation state consistent after reconnects.
+		queryClient.setQueriesData<Message[]>({ queryKey: ['messages'] }, (current) => current?.map((message) => (
+		  message.id === updated.id ? { ...message, ...updated } : message
+		)));
         void queryClient.invalidateQueries({ queryKey: ['messages'] });
       });
       socket.on('presence.updated', () => {

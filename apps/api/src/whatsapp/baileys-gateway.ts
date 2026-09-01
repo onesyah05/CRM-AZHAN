@@ -2,9 +2,11 @@ import { mkdir, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
 	downloadMediaMessage,
 	normalizeMessageContent,
+  type Contact,
   type WAMessage,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -13,7 +15,7 @@ import type { ContactPresence, MessageStatus, WhatsAppStatus } from '@azhan-crm/
 import type { Pool, ResultSetHeader, RowDataPacket } from '@azhan-crm/database';
 import { normalizeIndonesianPhone } from '../phone.js';
 import { clearLoggedOutDatabaseAuthState, useDatabaseAuthState } from './database-auth-state.js';
-import type { HistoricalWhatsAppMessage, IncomingWhatsAppMessage, WhatsAppGateway, WhatsAppPresenceUpdate } from './gateway.js';
+import type { HistoricalWhatsAppContact, HistoricalWhatsAppMessage, IncomingWhatsAppMessage, WhatsAppGateway, WhatsAppPresenceUpdate } from './gateway.js';
 
 type Socket = ReturnType<typeof makeWASocket>;
 type GatewayLogger = {
@@ -62,13 +64,18 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private readonly statuses = new Map<number, WhatsAppStatus>();
   private readonly reconnectAttempts = new Map<number, number>();
 	private readonly reconnectTimers = new Map<number, NodeJS.Timeout>();
+	private readonly connectionWatchdogs = new Map<number, NodeJS.Timeout>();
+	private readonly recoveringSockets = new WeakSet<Socket>();
 	private readonly lockHeartbeats = new Map<number, NodeJS.Timeout>();
 	private readonly authFinalizers = new Map<number, { flush: () => Promise<void>; clear: () => Promise<void> }>();
 	private readonly presences = new Map<string, Omit<WhatsAppPresenceUpdate, 'sessionId' | 'phone'>>();
 	private readonly historyChains = new Map<number, Promise<void>>();
+	private readonly jidAliases = new Map<number, Map<string, string>>();
+	private readonly profilePictures = new Map<string, { expiresAt: number; value: { data: Buffer; mimeType: string } | null }>();
 	private readonly lockOwner = `crm-wa-${process.pid}-${randomUUID()}`;
   private incomingHandler: ((message: IncomingWhatsAppMessage) => Promise<void>) | null = null;
 	private historyHandler: ((messages: HistoricalWhatsAppMessage[]) => Promise<void>) | null = null;
+	private contactsHandler: ((contacts: HistoricalWhatsAppContact[]) => Promise<void>) | null = null;
 	private statusHandler: ((update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>) | null = null;
 	private presenceHandler: ((update: WhatsAppPresenceUpdate) => void) | null = null;
 
@@ -86,6 +93,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   onHistory(handler: (messages: HistoricalWhatsAppMessage[]) => Promise<void>): void {
 	this.historyHandler = handler;
+  }
+
+  onContacts(handler: (contacts: HistoricalWhatsAppContact[]) => Promise<void>): void {
+	this.contactsHandler = handler;
   }
 
   onStatus(handler: (update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>): void {
@@ -118,6 +129,38 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 	  this.presences.delete(key);
 	  this.presenceHandler?.({ sessionId, phone, presence: 'offline' });
 	}
+  }
+
+  private prepareContacts(sessionId: number, contacts: Array<Partial<Contact>>): HistoricalWhatsAppContact[] {
+	const aliases = this.jidAliases.get(sessionId) ?? new Map<string, string>();
+	const syncedContacts: HistoricalWhatsAppContact[] = [];
+	for (const contact of contacts) {
+	  const name = contact.name ?? contact.notify ?? contact.verifiedName;
+	  const phoneJid = [contact.jid, contact.id].find((jid) => jid?.endsWith('@s.whatsapp.net'));
+	  if (!phoneJid) continue;
+	  const contactAliases = [...new Set([contact.id, contact.jid, contact.lid].filter((jid): jid is string => Boolean(jid)))];
+	  for (const jid of contactAliases) aliases.set(jid, phoneJid);
+	  const phone = normalizeIndonesianPhone(phoneJid.split('@')[0] ?? '');
+	  syncedContacts.push({ sessionId, phone, jid: phoneJid, aliases: contactAliases, name: name ?? phone });
+	}
+	this.jidAliases.set(sessionId, aliases);
+	return syncedContacts;
+  }
+
+  private queueContacts(sessionId: number, contacts: HistoricalWhatsAppContact[]): void {
+	if (!this.contactsHandler || !contacts.length) return;
+	const previous = this.historyChains.get(sessionId) ?? Promise.resolve();
+	const current = previous.then(() => this.contactsHandler?.(contacts)).catch((error) => {
+	  this.logger?.warn({
+		eventType: 'whatsapp_contact_sync_failed',
+		brandId: sessionId,
+		errorName: error instanceof Error ? error.name : 'UnknownError',
+	  }, 'WhatsApp contacts could not be imported');
+	});
+	this.historyChains.set(sessionId, current);
+	void current.finally(() => {
+	  if (this.historyChains.get(sessionId) === current) this.historyChains.delete(sessionId);
+	});
   }
 
   getStatus(sessionId: number): WhatsAppStatus {
@@ -185,6 +228,57 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 	const timer = this.reconnectTimers.get(sessionId);
 	if (timer) clearTimeout(timer);
 	this.reconnectTimers.delete(sessionId);
+  }
+
+  private clearConnectionWatchdog(sessionId: number): void {
+	const watchdog = this.connectionWatchdogs.get(sessionId);
+	if (watchdog) clearInterval(watchdog);
+	this.connectionWatchdogs.delete(sessionId);
+  }
+
+  private startConnectionWatchdog(sessionId: number, socket: Socket): void {
+	this.clearConnectionWatchdog(sessionId);
+	const watchdog = setInterval(() => {
+	  if (this.sockets.get(sessionId) !== socket) {
+		this.clearConnectionWatchdog(sessionId);
+		return;
+	  }
+	  if (!socket.ws.isOpen) void this.recoverDeadSocket(sessionId, socket);
+	}, 15_000);
+	watchdog.unref();
+	this.connectionWatchdogs.set(sessionId, watchdog);
+  }
+
+  private async recoverDeadSocket(sessionId: number, socket: Socket): Promise<void> {
+	if (this.sockets.get(sessionId) !== socket || this.recoveringSockets.has(socket)) return;
+	this.recoveringSockets.add(socket);
+	this.clearConnectionWatchdog(sessionId);
+	this.logger?.warn({
+	  eventType: 'whatsapp_dead_socket_detected',
+	  brandId: sessionId,
+	}, 'WhatsApp WebSocket stopped without a close event; reconnecting');
+	const authFinalizer = this.authFinalizers.get(sessionId);
+	try {
+	  await authFinalizer?.flush();
+	} catch (error) {
+	  this.logger?.warn({
+		eventType: 'whatsapp_auth_flush_failed',
+		brandId: sessionId,
+		errorName: error instanceof Error ? error.name : 'UnknownError',
+	  }, 'WhatsApp auth state could not be flushed before reconnect');
+	}
+	await this.releaseConnectionLock(sessionId);
+	if (this.sockets.get(sessionId) !== socket) return;
+	this.sockets.delete(sessionId);
+	this.authFinalizers.delete(sessionId);
+	this.clearPresences(sessionId);
+	socket.end(new Error('WhatsApp WebSocket is no longer open.'));
+	this.setStatus(sessionId, {
+	  status: 'reconnecting',
+	  message: 'Koneksi terputus, mencoba kembali…',
+	  developmentStorage: this.authDriver === 'filesystem',
+	});
+	this.scheduleReconnect(sessionId);
   }
 
   private scheduleReconnect(sessionId: number, statusCode?: number): void {
@@ -276,8 +370,8 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       auth: state,
       printQRInTerminal: false,
       markOnlineOnConnect: false,
-	  browser: ['Azhan CRM', 'Chrome', '0.1.0'],
-	  syncFullHistory: false,
+	  browser: Browsers.ubuntu('Chrome'),
+	  syncFullHistory: true,
 	  shouldSyncHistoryMessage: () => true,
 	  connectTimeoutMs: 20_000,
     });
@@ -298,6 +392,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       if (connection === 'open') {
 		this.clearReconnectTimer(sessionId);
 		this.reconnectAttempts.delete(sessionId);
+		this.startConnectionWatchdog(sessionId, socket);
         const connectedPhone = socket.user?.id ? normalizeIndonesianPhone(socket.user.id.split(':')[0] ?? '') : '';
 		this.setStatus(sessionId, {
           status: 'connected',
@@ -310,6 +405,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
       if (connection === 'close') {
 		if (this.sockets.get(sessionId) !== socket) return;
+		if (this.recoveringSockets.has(socket)) return;
+		this.recoveringSockets.add(socket);
+		this.clearConnectionWatchdog(sessionId);
 		const authFinalizer = this.authFinalizers.get(sessionId);
 		await authFinalizer?.flush();
 		await this.releaseConnectionLock(sessionId);
@@ -319,32 +417,47 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 		this.authFinalizers.delete(sessionId);
         const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
+		const pairingBootstrapFailed = statusCode === 428 && !state.creds.registered;
 		if (loggedOut) await authFinalizer?.clear();
 		this.setStatus(sessionId, {
-          status: loggedOut ? 'logged_out' : 'reconnecting',
-          message: loggedOut ? 'Perangkat telah logout.' : 'Koneksi terputus, mencoba kembali…',
+          status: loggedOut ? 'logged_out' : pairingBootstrapFailed ? 'disconnected' : 'reconnecting',
+          message: loggedOut
+			? 'Perangkat telah logout.'
+			: pairingBootstrapFailed
+			  ? 'QR belum berhasil dibuat. Tekan Tampilkan QR untuk mencoba lagi.'
+			  : 'Koneksi terputus, mencoba kembali…',
 		  developmentStorage: this.authDriver === 'filesystem',
         });
-        if (!loggedOut) {
+		if (!loggedOut && !pairingBootstrapFailed) {
 		  this.scheduleReconnect(sessionId, statusCode);
         }
       }
     });
 
     socket.ev.on('messages.upsert', ({ messages }) => {
-      for (const message of messages) void this.handleIncoming(sessionId, message);
+      for (const message of messages) {
+		void this.handleIncoming(sessionId, message).catch((error) => {
+		  this.logger?.warn({
+			eventType: 'whatsapp_incoming_message_failed',
+			brandId: sessionId,
+			errorName: error instanceof Error ? error.name : 'UnknownError',
+		  }, 'Incoming WhatsApp message could not be imported');
+		});
+	  }
     });
 
 	socket.ev.on('messaging-history.set', ({ contacts, messages }) => {
-	  if (!this.historyHandler || !messages.length) return;
 	  const names = new Map<string, string>();
 	  for (const contact of contacts) {
 		const name = contact.name ?? contact.notify ?? contact.verifiedName;
-		if (!name) continue;
-		for (const jid of [contact.id, contact.jid, contact.lid]) if (jid) names.set(jid, name);
+		if (name) for (const jid of [contact.id, contact.jid, contact.lid]) if (jid) names.set(jid, name);
 	  }
+	  const syncedContacts = this.prepareContacts(sessionId, contacts);
 	  const previous = this.historyChains.get(sessionId) ?? Promise.resolve();
-	  const current = previous.then(() => this.handleHistory(sessionId, messages, names)).catch((error) => {
+	  const current = previous.then(async () => {
+		if (this.contactsHandler && syncedContacts.length) await this.contactsHandler(syncedContacts);
+		if (this.historyHandler && messages.length) await this.handleHistory(sessionId, messages, names);
+	  }).catch((error) => {
 		this.logger?.warn({
 		  eventType: 'whatsapp_history_sync_failed',
 		  brandId: sessionId,
@@ -355,6 +468,24 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 	  void current.finally(() => {
 		if (this.historyChains.get(sessionId) === current) this.historyChains.delete(sessionId);
 	  });
+	});
+
+	socket.ev.on('contacts.upsert', (contacts) => {
+	  this.queueContacts(sessionId, this.prepareContacts(sessionId, contacts));
+	});
+
+	socket.ev.on('contacts.update', (contacts) => {
+	  this.queueContacts(sessionId, this.prepareContacts(sessionId, contacts));
+	});
+
+	socket.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
+	  if (!lid.endsWith('@lid') || !jid.endsWith('@s.whatsapp.net')) return;
+	  const aliases = this.jidAliases.get(sessionId) ?? new Map<string, string>();
+	  aliases.set(lid, jid);
+	  aliases.set(jid, jid);
+	  this.jidAliases.set(sessionId, aliases);
+	  const phone = normalizeIndonesianPhone(jid.split('@')[0] ?? '');
+	  this.queueContacts(sessionId, [{ sessionId, phone, jid, aliases: [lid, jid], name: phone }]);
 	});
 
 	socket.ev.on('presence.update', ({ id, presences }) => {
@@ -415,7 +546,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   private async handleIncoming(sessionId: number, message: WAMessage): Promise<void> {
     if (!this.incomingHandler || message.key.fromMe) return;
-	const parsed = await this.parseMessage(sessionId, message, message.pushName ?? undefined);
+	  const parsed = await this.parseMessage(sessionId, message, message.pushName ?? undefined);
 	if (parsed) await this.incomingHandler(parsed);
   }
 
@@ -432,8 +563,27 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   }
 
   private async parseMessage(sessionId: number, message: WAMessage, name?: string): Promise<HistoricalWhatsAppMessage | null> {
-    const jid = message.key.remoteJid;
-	if (!jid || jid === 'status@broadcast' || jid.endsWith('@g.us') || jid.endsWith('@newsletter')) return null;
+	const originalJid = message.key.remoteJid;
+	if (!originalJid || originalJid.endsWith('@broadcast') || originalJid.endsWith('@g.us') || originalJid.endsWith('@newsletter')) return null;
+	const aliases = this.jidAliases.get(sessionId) ?? new Map<string, string>();
+	const incomingPhoneJid = !message.key.fromMe && message.key.senderPn?.endsWith('@s.whatsapp.net')
+	  ? message.key.senderPn
+	  : undefined;
+	const jid = aliases.get(originalJid) ?? incomingPhoneJid ?? originalJid;
+	if (!jid.endsWith('@s.whatsapp.net')) {
+	  if (originalJid.endsWith('@lid')) {
+		this.logger?.warn({
+		  eventType: 'whatsapp_lid_unresolved',
+		  brandId: sessionId,
+		}, 'WhatsApp LID message did not include a phone-number mapping');
+	  }
+	  return null;
+	}
+	if (originalJid !== jid) {
+	  aliases.set(originalJid, jid);
+	  aliases.set(jid, jid);
+	  this.jidAliases.set(sessionId, aliases);
+	}
 	const content = normalizeMessageContent(message.message);
 	const image = content?.imageMessage;
 	const video = content?.videoMessage;
@@ -480,8 +630,12 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   async sendText(input: { sessionId: number; phone: string; text: string; messageId?: string }): Promise<{ messageId: string }> {
     const socket = this.sockets.get(input.sessionId);
     if (!socket) throw new Error('WhatsApp belum terhubung.');
+	if (!socket.ws.isOpen) {
+	  void this.recoverDeadSocket(input.sessionId, socket);
+	  throw new Error('Koneksi WhatsApp terputus dan sedang dihubungkan kembali.');
+	}
     const phone = normalizeIndonesianPhone(input.phone).replace('+', '');
-	const result = await socket.sendMessage(`${phone}@s.whatsapp.net`, { text: input.text }, input.messageId ? { messageId: input.messageId } : undefined);
+    const result = await socket.sendMessage(`${phone}@s.whatsapp.net`, { text: input.text });
     if (!result?.key.id) throw new Error('WhatsApp tidak mengembalikan ID pesan.');
     return { messageId: result.key.id };
   }
@@ -489,15 +643,18 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   async sendMedia(input: { sessionId: number; phone: string; type: Exclude<IncomingWhatsAppMessage['type'], 'text'>; data: Buffer; mimeType: string; fileName: string; caption: string; messageId?: string }): Promise<{ messageId: string }> {
 	const socket = this.sockets.get(input.sessionId);
 	if (!socket) throw new Error('WhatsApp belum terhubung.');
+	if (!socket.ws.isOpen) {
+	  void this.recoverDeadSocket(input.sessionId, socket);
+	  throw new Error('Koneksi WhatsApp terputus dan sedang dihubungkan kembali.');
+	}
 	const jid = `${normalizeIndonesianPhone(input.phone).replace('+', '')}@s.whatsapp.net`;
-	const options = input.messageId ? { messageId: input.messageId } : undefined;
 	const result = input.type === 'image'
-	  ? await socket.sendMessage(jid, { image: input.data, caption: input.caption, mimetype: input.mimeType }, options)
+	  ? await socket.sendMessage(jid, { image: input.data, caption: input.caption, mimetype: input.mimeType })
 	  : input.type === 'video'
-		? await socket.sendMessage(jid, { video: input.data, caption: input.caption, mimetype: input.mimeType }, options)
+		? await socket.sendMessage(jid, { video: input.data, caption: input.caption, mimetype: input.mimeType })
 		: input.type === 'audio'
-		  ? await socket.sendMessage(jid, { audio: input.data, mimetype: input.mimeType, ptt: false }, options)
-		  : await socket.sendMessage(jid, { document: input.data, caption: input.caption, mimetype: input.mimeType, fileName: input.fileName }, options);
+		  ? await socket.sendMessage(jid, { audio: input.data, mimetype: input.mimeType, ptt: false })
+		  : await socket.sendMessage(jid, { document: input.data, caption: input.caption, mimetype: input.mimeType, fileName: input.fileName });
 	if (!result?.key.id) throw new Error('WhatsApp tidak mengembalikan ID pesan.');
 	return { messageId: result.key.id };
   }
@@ -524,8 +681,41 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 	await socket.readMessages(messageIds.map((id) => ({ remoteJid, id, fromMe: false })));
   }
 
+  async getProfilePicture(sessionId: number, phone: string): Promise<{ data: Buffer; mimeType: string } | null> {
+	const normalizedPhone = normalizeIndonesianPhone(phone);
+	const cacheKey = `${sessionId}:${normalizedPhone}`;
+	const cached = this.profilePictures.get(cacheKey);
+	if (cached && cached.expiresAt > Date.now()) return cached.value;
+	const socket = this.sockets.get(sessionId);
+	if (!socket) return null;
+	try {
+	  const jid = `${normalizedPhone.replace('+', '')}@s.whatsapp.net`;
+	  const url = await socket.profilePictureUrl(jid, 'image');
+	  if (!url) {
+		this.profilePictures.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, value: null });
+		return null;
+	  }
+	  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+	  if (!response.ok) throw new Error(`PROFILE_PICTURE_HTTP_${response.status}`);
+	  const data = Buffer.from(await response.arrayBuffer());
+	  if (!data.length || data.length > 5 * 1024 * 1024) throw new Error('PROFILE_PICTURE_INVALID_SIZE');
+	  const value = { data, mimeType: response.headers.get('content-type')?.split(';')[0] ?? 'image/jpeg' };
+	  this.profilePictures.set(cacheKey, { expiresAt: Date.now() + 30 * 60_000, value });
+	  return value;
+	} catch (error) {
+	  this.profilePictures.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, value: null });
+	  this.logger?.warn({
+		eventType: 'whatsapp_profile_picture_unavailable',
+		brandId: sessionId,
+		errorName: error instanceof Error ? error.name : 'UnknownError',
+	  }, 'WhatsApp profile picture is unavailable');
+	  return null;
+	}
+  }
+
   async disconnect(sessionId: number, logout = false): Promise<void> {
 	this.clearReconnectTimer(sessionId);
+	this.clearConnectionWatchdog(sessionId);
 	this.reconnectAttempts.delete(sessionId);
     const socket = this.sockets.get(sessionId);
 	this.clearPresences(sessionId);

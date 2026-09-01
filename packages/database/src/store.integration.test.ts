@@ -98,7 +98,7 @@ describe('MySqlCrmStore', () => {
     expect(messages).toHaveLength(1);
     const dashboard = await store.dashboard(101, 'today');
     expect(dashboard.newLeads).toBe(1);
-    expect(dashboard.activities.length).toBeGreaterThan(0);
+    expect((await store.listActivities(101)).length).toBeGreaterThan(0);
     expect(await store.getLead(202, first.lead.id)).toBeNull();
   });
 
@@ -138,6 +138,83 @@ describe('MySqlCrmStore', () => {
 	  ['outbound', 'Balasan lama', 'delivered'],
 	]);
 	await expect(store.listActivities(brandId)).resolves.toHaveLength(0);
+  });
+
+  it('mengimpor kontak massal secara idempoten dalam scope brand', async () => {
+    const first = await store.importContacts(505, [
+      { name: 'Nama Lama', phone: '+6281211112222' },
+      { name: 'Nama Terbaru', phone: '+6281211112222' },
+      { name: 'Kontak Kedua', phone: '+6281233334444' },
+    ]);
+    expect(first).toEqual({ imported: 2, created: 2, updated: 0, duplicates: 1 });
+
+    const second = await store.importContacts(505, [{ name: 'Nama Diperbarui', phone: '+6281211112222' }]);
+    expect(second).toEqual({ imported: 1, created: 0, updated: 1, duplicates: 0 });
+    await expect(store.listContacts(505)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Nama Diperbarui', phone: '+6281211112222', source: 'Impor massal' }),
+      expect.objectContaining({ name: 'Kontak Kedua', phone: '+6281233334444', source: 'Impor massal' }),
+    ]));
+    await expect(store.listContacts(506)).resolves.toHaveLength(0);
+  });
+
+  it('menggabungkan percakapan LID lama ke nomor WhatsApp asli tanpa kehilangan pesan', async () => {
+    const brandId = 606;
+    await store.ingestIncoming({
+      brandId,
+      messageId: 'real-phone-message',
+      jid: '6281255556666@s.whatsapp.net',
+      phone: '+6281255556666',
+      name: 'Kontak Asli',
+      body: 'Pesan lewat nomor asli',
+      occurredAt: '2026-08-29T03:00:00.000Z',
+    });
+    await store.ingestIncoming({
+      brandId,
+      messageId: 'legacy-lid-message',
+      jid: '153136080437932@lid',
+      phone: '+153136080437932',
+      name: 'Kontak Asli',
+      body: 'Pesan lama lewat LID',
+      occurredAt: '2026-08-29T03:01:00.000Z',
+    });
+
+    const unresolvedConversation = (await store.listConversations(brandId)).find((conversation) => conversation.phone === '+153136080437932');
+    expect(unresolvedConversation?.phoneResolved).toBe(false);
+    await expect(store.enqueueOutboundMessage(brandId, unresolvedConversation!.id, 'Jangan dikirim ke LID')).resolves.toBeNull();
+
+    await store.syncWhatsappContacts(brandId, [{
+      name: 'Kontak Asli',
+      phone: '+6281255556666',
+      jid: '6281255556666@s.whatsapp.net',
+      aliases: ['153136080437932@lid', '6281255556666@s.whatsapp.net'],
+    }]);
+
+    const contacts = await store.listContacts(brandId);
+    const conversations = await store.listConversations(brandId);
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0]).toMatchObject({ phone: '+6281255556666', conversationId: conversations[0]?.id });
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.phoneResolved).toBe(true);
+    await expect(store.listMessages(brandId, conversations[0]!.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ body: 'Pesan lewat nomor asli' }),
+      expect.objectContaining({ body: 'Pesan lama lewat LID' }),
+    ]));
+  });
+
+  it('mengganti nama placeholder nomor ketika WhatsApp kemudian mengirim nama kontak', async () => {
+    const brandId = 607;
+    const common = {
+      brandId,
+      jid: '6281277778888@s.whatsapp.net',
+      phone: '+6281277778888',
+      occurredAt: '2026-08-29T03:00:00.000Z',
+    };
+    await store.ingestIncoming({ ...common, messageId: 'placeholder-name', name: '+6281277778888', body: 'Pesan pertama' });
+    await store.ingestIncoming({ ...common, messageId: 'resolved-name', name: 'Nama dari WhatsApp', body: 'Pesan kedua' });
+
+    await expect(store.listContacts(brandId)).resolves.toEqual([
+      expect.objectContaining({ name: 'Nama dari WhatsApp', phone: '+6281277778888' }),
+    ]);
   });
 
   it('mempertahankan optimistic version dan menyimpan alasan Lost', async () => {
@@ -210,9 +287,15 @@ describe('MySqlCrmStore', () => {
     expect(job?.payload.messageId).toBe(pending?.id);
     expect(await store.claimOutboundJobs('other-worker', 10)).toHaveLength(0);
 
-    const sent = await store.completeOutboundJob(job!);
+    const sent = await store.completeOutboundJob(job!, 'native-whatsapp-message-id');
     expect(sent?.status).toBe('sent');
-    const delivered = await store.updateMessageStatus(101, pending!.id, 'delivered');
+    const [messageRows] = await pool.execute<(RowDataPacket & { whatsapp_message_id: string })[]>(
+      `SELECT whatsapp_message_id FROM crm_messages
+        WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
+      [101, pending!.id],
+    );
+    expect(messageRows[0]?.whatsapp_message_id).toBe('native-whatsapp-message-id');
+    const delivered = await store.updateMessageStatus(101, 'native-whatsapp-message-id', 'delivered');
     expect(delivered?.status).toBe('delivered');
   });
 

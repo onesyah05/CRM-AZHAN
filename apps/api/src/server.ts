@@ -20,6 +20,7 @@ import { ErpGateway, ErpGatewayError } from './erp/gateway.js';
 import { BaileysWhatsAppGateway } from './whatsapp/baileys-gateway.js';
 import { TestFixtureWhatsAppGateway } from './whatsapp/test-fixture-gateway.js';
 import type { WhatsAppGateway } from './whatsapp/gateway.js';
+import { normalizeIndonesianPhone } from './phone.js';
 
 const logger = pino({
   level: config.nodeEnv === 'production' ? 'info' : 'debug',
@@ -562,6 +563,30 @@ app.get('/api/v1/schedules', requireBrand, async (request, response) => {
   }
 });
 
+app.get('/api/v1/contacts', requireBrand, async (request, response) => {
+  response.json(await store.listContacts(brandId(request), assigneeScope(request)));
+});
+
+app.post('/api/v1/contacts/import', requireBrand, requireManager, mutationLimiter, async (request, response) => {
+  const parsed = z.object({ contacts: z.array(z.object({
+    name: z.string().trim().min(1).max(120),
+    phone: z.string().trim().min(6).max(30),
+  })).min(1).max(1_000) }).safeParse(request.body);
+  if (!parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Daftar kontak belum valid. Gunakan format nama|nomorhp.');
+  const contacts = parsed.data.contacts.map((contact) => ({
+    name: contact.name,
+    phone: normalizeIndonesianPhone(contact.phone),
+  }));
+  const invalid = contacts
+    .map((contact, index) => ({ contact, index }))
+    .filter(({ contact }) => !/^\+[1-9]\d{7,14}$/.test(contact.phone));
+  if (invalid.length) {
+    return sendError(response, 400, 'INVALID_PHONE', 'Ada nomor telepon yang belum valid.', false,
+      invalid.slice(0, 20).map(({ index }) => ({ field: `contacts.${index}.phone`, message: `Nomor pada baris ${index + 1} belum valid.` })));
+  }
+  response.status(201).json(await store.importContacts(brandId(request), contacts));
+});
+
 app.get('/api/v1/leads', requireBrand, async (request, response) => {
   const leads = await store.listLeads(brandId(request), assigneeScope(request));
   const synchronized: Lead[] = [];
@@ -764,6 +789,16 @@ app.get('/api/v1/conversations', requireBrand, async (request, response) => {
 	};
   }));
 });
+app.get('/api/v1/conversations/:id/avatar', requireBrand, async (request, response) => {
+  const currentBrandId = brandId(request);
+  const conversation = (await store.listConversations(currentBrandId, assigneeScope(request)))
+	.find((item) => item.id === String(request.params.id));
+  if (!conversation?.phoneResolved) return response.status(204).end();
+  const picture = await whatsapp.getProfilePicture(currentBrandId, conversation.phone);
+  if (!picture) return response.status(204).end();
+  response.setHeader('Cache-Control', 'private, max-age=300');
+  response.type(picture.mimeType).send(picture.data);
+});
 app.get('/api/v1/conversations/:id/messages', requireBrand, async (request, response) => {
   const currentBrandId = brandId(request);
   const conversationId = String(request.params.id);
@@ -814,6 +849,8 @@ app.post('/api/v1/conversations/:id/messages', requireBrand, mutationLimiter, as
   if (!conversation) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
   try {
 	if (!config.testFixtures) {
+	  const transport = await (store as MySqlCrmStore).getConversationTransportContext(brandId(request), conversation.id);
+	  if (!transport) return sendError(response, 409, 'WHATSAPP_IDENTITY_SYNCING', 'Nomor WhatsApp kontak masih disinkronkan. Hubungkan ulang WhatsApp lalu tunggu histori selesai.');
 	  const message = await (store as MySqlCrmStore).enqueueOutboundMessage(
 		brandId(request), conversation.id, parsed.data.body,
 	  );
@@ -838,6 +875,8 @@ app.post(
   async (request, response) => {
 	if (config.testFixtures) return sendError(response, 409, 'MEDIA_TEST_UNAVAILABLE', 'Lampiran tidak tersedia pada fixture pengujian.');
 	if (!(await canAccessConversation(request, String(request.params.id)))) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
+	const transport = await (store as MySqlCrmStore).getConversationTransportContext(brandId(request), String(request.params.id));
+	if (!transport) return sendError(response, 409, 'WHATSAPP_IDENTITY_SYNCING', 'Nomor WhatsApp kontak masih disinkronkan. Hubungkan ulang WhatsApp lalu tunggu histori selesai.');
 	if (!Buffer.isBuffer(request.body) || !request.body.length) return sendError(response, 400, 'MEDIA_REQUIRED', 'Pilih file untuk dikirim.');
 	const rawFileName = request.header('x-file-name') ?? 'lampiran';
 	let decodedFileName: string;
@@ -899,7 +938,7 @@ app.get('/api/v1/messages/:id/media', requireBrand, async (request, response) =>
   response.type(media.mimeType);
   const disposition = /^(image|video|audio)\//.test(media.mimeType) ? 'inline' : 'attachment';
   response.setHeader('Content-Disposition', `${disposition}; filename="${basename(media.fileName).replaceAll('"', '')}"`);
-  response.sendFile(path, (error) => {
+  response.sendFile(path, { dotfiles: 'allow' }, (error) => {
     if (error && !response.headersSent) sendError(response, 404, 'MEDIA_NOT_FOUND', 'Lampiran tidak ditemukan.');
   });
 });
@@ -916,22 +955,23 @@ async function processOutboundQueue() {
 		continue;
 	  }
 	  try {
+		let sent: { messageId: string };
 		if (job.payload.type && job.payload.type !== 'text') {
 		  const mediaPath = job.payload.mediaObjectKey ? resolveMediaPath(job.payload.mediaObjectKey) : null;
 		  if (!mediaPath) throw new Error('File lampiran tidak ditemukan.');
-		  await whatsapp.sendMedia({
+		  sent = await whatsapp.sendMedia({
 			sessionId: job.brandId, phone: job.payload.phone, type: job.payload.type,
 			data: await readFile(mediaPath), mimeType: job.payload.mimeType ?? 'application/octet-stream',
 			fileName: job.payload.fileName ?? 'lampiran', caption: job.payload.body,
 			messageId: job.payload.messageId,
 		  });
 		} else {
-		  await whatsapp.sendText({
+		  sent = await whatsapp.sendText({
 			sessionId: job.brandId, phone: job.payload.phone, text: job.payload.body,
 			messageId: job.payload.messageId,
 		  });
 		}
-		const message = await persistentStore.completeOutboundJob(job);
+		const message = await persistentStore.completeOutboundJob(job, sent.messageId);
 		metrics.outboundSent += 1;
 		if (message) io.to(`brand:${job.brandId}`).emit('message.status.updated', message);
 	  } catch (error) {
@@ -979,6 +1019,16 @@ whatsapp.onIncoming(async (incoming) => {
 	...(incoming.media ? { mediaMimeType: incoming.media.mimeType, mediaFileName: incoming.media.fileName } : {}),
   });
   io.to(`brand:${incoming.sessionId}`).emit('message.created', created);
+});
+
+whatsapp.onContacts(async (contacts) => {
+  if (config.testFixtures || !contacts.length) return;
+  const sessionId = contacts[0]!.sessionId;
+  await (store as MySqlCrmStore).syncWhatsappContacts(
+    sessionId,
+    contacts.map(({ name, phone, jid, aliases }) => ({ name, phone, jid, aliases })),
+  );
+  io.to(`brand:${sessionId}`).emit('contacts.synced', { imported: contacts.length });
 });
 
 whatsapp.onHistory(async (messages) => {

@@ -7,6 +7,10 @@
 3. Pilih **Tampilkan QR**, lalu pindai dari menu **Perangkat tertaut** pada WhatsApp.
 4. Pastikan status berubah menjadi `connected` sebelum mengirim pesan.
 
+Pada pairing baru, gateway memakai profil WhatsApp Desktop dan meminta sinkronisasi histori penuh. WhatsApp tetap menentukan jumlah serta rentang histori yang dikirim; chat lama akan muncul bertahap selama event sinkronisasi diterima.
+
+Kontak histori disimpan ke direktori CRM brand aktif. Identitas `@lid` dipetakan dahulu ke nomor WhatsApp asli. Status/story, broadcast, grup, newsletter, serta LID yang belum memiliki pasangan nomor tidak dimasukkan ke inbox.
+
 QR dan kredensial tidak boleh disalin ke log, tiket, atau repository. Sesi production disimpan terenkripsi di database dan dibatasi satu sesi per brand.
 
 ## Reconnect
@@ -18,6 +22,12 @@ Saat worker/API hidup kembali, sesi database yang masih memiliki auth terenkrips
 Jika worker sebelumnya berhenti mendadak, lease database dapat bertahan maksimal 45 detik. Kondisi ini ditampilkan sebagai `reconnecting` dan dicoba ulang otomatis; pengguna tidak menerima error internal.
 
 Event penutupan dari socket lama diabaikan bila socket baru sudah mengambil alih. Hal ini mencegah koneksi baru ikut terhapus akibat event yang datang terlambat.
+
+Pengiriman pesan tidak memaksakan UUID internal CRM sebagai ID WhatsApp. ID native yang diterbitkan Baileys disimpan setelah pengiriman sukses agar delivery receipt dapat dicocokkan dan perangkat tidak menolak format ID buatan aplikasi.
+
+## Impor kontak massal
+
+Admin Travel dapat membuka **Kontak → Impor kontak**. Gunakan satu kontak per baris dengan format `nama|nomorhp`, misalnya `Ahmad Fauzi|081234567890`. Nomor dinormalisasi ke E.164, duplikat pada brand yang sama diperbarui, dan maksimal 1.000 baris diproses dalam satu permintaan.
 
 ## Pemeriksaan gangguan
 

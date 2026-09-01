@@ -182,7 +182,7 @@ export function PipelinePage() {
                     draggable
                     onDragStart={(event) => { event.dataTransfer.setData('text/lead-id', lead.id); event.dataTransfer.effectAllowed = 'move'; }}
                   >
-                    <header><button className="lead-card__identity" onClick={() => setDetailLead(lead)}><Avatar name={lead.name} size="sm" /><span><strong>{lead.name}</strong><small>{lead.phone}</small></span></button><GripVertical className="drag-handle" size={18} aria-hidden="true" /></header>
+                    <header><button className="lead-card__identity" onClick={() => setDetailLead(lead)}><Avatar name={lead.name} size="sm" {...(lead.conversationId ? { src: `/api/v1/conversations/${lead.conversationId}/avatar` } : {})} /><span><strong>{lead.name}</strong><small>{lead.phone}</small></span></button><GripVertical className="drag-handle" size={18} aria-hidden="true" /></header>
                     <button className="lead-card__main" onClick={() => setDetailLead(lead)}>
                       <span className="lead-card__package">{lead.scheduleName || 'Paket belum dipilih'}</span>
                       <span className="lead-card__facts"><span><CalendarClock size={14} />{lead.departurePlan || 'Rencana belum diisi'}</span><span>{lead.pax} pax</span></span>

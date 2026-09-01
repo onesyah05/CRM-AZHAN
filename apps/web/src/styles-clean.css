@@ -174,7 +174,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .table-contact > span { min-width: 0; display: flex; flex-direction: column; }
 .table-contact strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .table-contact small { margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.avatar { display: inline-grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #fff; font-weight: 800; }
+.avatar { display: inline-grid; place-items: center; flex: 0 0 auto; overflow: hidden; border-radius: 50%; color: #fff; font-weight: 800; }
+.avatar > img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .avatar--sm { width: 34px; height: 34px; font-size: 10px; }
 .avatar--md { width: 42px; height: 42px; font-size: 11px; }
 .avatar--lg { width: 66px; height: 66px; font-size: 17px; }
@@ -284,6 +285,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .message-header__back { display: none; }
 .message-history { min-height: 0; display: flex; flex: 1; flex-direction: column; padding: 24px clamp(22px,6%,72px); overflow-y: auto; background-color: #f2f5f8; background-image: radial-gradient(circle at 1px 1px,rgba(89,105,125,.08) 1px,transparent 0); background-size: 24px 24px; }
 .message-day { width: fit-content; margin: 0 auto 17px; padding: 5px 11px; border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.86); font-size: 9px; }
+.message-history > .message-day:first-child { margin-top: auto; }
 .message-bubble-wrap { display: flex; margin: 6px 0; animation: message-arrive .28s var(--ease-out) both; }
 @keyframes message-arrive { from { opacity: 0; transform: translate3d(0,5px,0) scale(.99); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); } }
 .message-bubble-wrap--outbound { justify-content: flex-end; }
@@ -295,6 +297,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .message-media-video { display: block; width: min(420px,100%); max-height: 420px; margin-bottom: 7px; border-radius: 9px; background: #0f172a; }
 .message-media-audio { display: block; width: min(340px,100%); margin-bottom: 7px; }
 .message-document { min-width: 210px; display: flex; align-items: center; gap: 8px; margin-bottom: 7px; padding: 10px; border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line)); border-radius: 9px; color: var(--brand); background: rgba(255,255,255,.7); font-size: 11px; font-weight: 700; }
+.message-media-missing { min-width: min(270px,100%); display: flex; align-items: center; gap: 10px; margin-bottom: 7px; padding: 13px; border: 1px dashed #cbd5e1; border-radius: 10px; color: #64748b; background: rgba(248,250,252,.9); }
+.message-media-missing > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.message-media-missing strong { color: #475569; font-size: 11px; }
+.message-media-missing small { font-size: 9px; line-height: 1.4; }
+.message-history__end { width: 1px; height: 1px; flex: 0 0 1px; }
 .message-retry { margin-top: 5px; padding: 3px 7px; border: 1px solid #fecaca; border-radius: 6px; color: var(--danger); background: var(--danger-bg); font-size: 9px; font-weight: 700; cursor: pointer; }
 .composer { padding: 13px 18px 15px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); }
 .composer__box { min-height: 54px; display: flex; align-items: flex-end; padding: 3px; border: 1px solid var(--line); border-radius: 14px; background: #fff; transition: border-color .18s, box-shadow .18s; }
@@ -512,10 +519,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .contacts-panel, .activities-page-panel { overflow: hidden; }
 .contacts-panel .table-tools, .activities-page-panel .table-tools { min-height: 70px; padding: 12px 16px; background: #fbfcfd; }
 .contacts-panel .data-table td { height: 76px; }
+.contacts-table { min-width: 860px; }
 .table-result-count { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .table-result-count strong { color: var(--ink); font-size: 12px; }
 .table-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .contact-chat-button { min-width: 72px; }
+.contact-status { display: inline-flex; align-items: center; min-height: 25px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #f8fafc; font-size: 9px; font-weight: 750; white-space: nowrap; }
+.contact-status--active { border-color: color-mix(in srgb,var(--success) 20%,#fff); color: #166534; background: var(--success-bg); }
+.contact-no-chat { color: var(--faint); font-size: 9px; white-space: nowrap; }
+.contact-import-dialog { gap: 12px; }
+.contact-import-dialog textarea { min-height: 230px; resize: vertical; font-family: inherit; line-height: 1.65; }
+.contact-import-dialog .field small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.contact-import-dialog .inline-error > div { display: grid; gap: 3px; }
+.contact-import-success { display: flex; align-items: flex-start; gap: 12px; padding: 15px; border: 1px solid #bbf7d0; border-radius: 12px; color: #166534; background: var(--success-bg); }
+.contact-import-success > svg { flex: 0 0 auto; }
+.contact-import-success strong { display: block; font-size: 12px; }
+.contact-import-success p { margin: 4px 0 0; color: #3f6f50; font-size: 10px; }
+.contact-import-preview { display: flex; align-items: baseline; gap: 7px; padding: 11px 13px; border: 1px solid var(--line-soft); border-radius: 10px; background: #f8fafc; }
+.contact-import-preview strong { color: var(--brand); font-size: 16px; }
+.contact-import-preview span { color: var(--muted); font-size: 10px; }
 .activity-insights { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
 .activity-insights > div { min-height: 74px; display: flex; align-items: center; gap: 11px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 13px; background: #fff; box-shadow: var(--shadow); }
 .activity-insights > div > span:last-child { display: flex; flex-direction: column; }

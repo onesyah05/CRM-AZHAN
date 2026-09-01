@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type {
   Activity,
   Conversation,
+  Contact,
+  ContactImportResult,
   DashboardMetrics,
   DashboardPeriod,
   DealRequest,
@@ -63,6 +65,7 @@ interface ConversationRow extends RowDataPacket {
   lead_id: string;
   display_name: string;
   phone_e164: string;
+  whatsapp_jid: string;
   last_message_preview: string | null;
   last_message_at: string | null;
   unread_count: number;
@@ -72,6 +75,18 @@ interface ConversationRow extends RowDataPacket {
 
 interface ConversationTransportRow extends RowDataPacket {
   whatsapp_jid: string;
+}
+
+interface ContactRow extends RowDataPacket {
+  id: string;
+  display_name: string;
+  phone_e164: string;
+  email: string | null;
+  city: string | null;
+  source: string | null;
+  conversation_id: string | null;
+  lead_id: string | null;
+  assignee_name: string | null;
 }
 
 interface TeamMemberRow extends RowDataPacket {
@@ -517,6 +532,146 @@ export class MySqlCrmStore {
     return tagsByLead(rows);
   }
 
+  async listContacts(brandId: number, assigneeUserId?: number): Promise<Contact[]> {
+    await this.ensureBrand(brandId);
+    const [rows] = await this.pool.execute<ContactRow[]>(
+      `SELECT LOWER(CONCAT(SUBSTRING(HEX(c.id),1,8),'-',SUBSTRING(HEX(c.id),9,4),'-',SUBSTRING(HEX(c.id),13,4),'-',SUBSTRING(HEX(c.id),17,4),'-',SUBSTRING(HEX(c.id),21,12))) AS id,
+              c.display_name,c.phone_e164,c.email,c.city,c.source,
+              LOWER(CONCAT(SUBSTRING(HEX(cv.id),1,8),'-',SUBSTRING(HEX(cv.id),9,4),'-',SUBSTRING(HEX(cv.id),13,4),'-',SUBSTRING(HEX(cv.id),17,4),'-',SUBSTRING(HEX(cv.id),21,12))) AS conversation_id,
+              LOWER(CONCAT(SUBSTRING(HEX(l.id),1,8),'-',SUBSTRING(HEX(l.id),9,4),'-',SUBSTRING(HEX(l.id),13,4),'-',SUBSTRING(HEX(l.id),17,4),'-',SUBSTRING(HEX(l.id),21,12))) AS lead_id,
+              l.assignee_name
+         FROM crm_contacts c
+         LEFT JOIN crm_leads l ON l.id=(SELECT l2.id FROM crm_leads l2
+           WHERE l2.brand_id=c.brand_id AND l2.contact_id=c.id AND l2.deleted_at IS NULL
+           ORDER BY l2.updated_at DESC LIMIT 1)
+         LEFT JOIN crm_conversations cv ON cv.id=(SELECT cv2.id FROM crm_conversations cv2
+           WHERE cv2.brand_id=c.brand_id AND cv2.contact_id=c.id
+           ORDER BY cv2.last_message_at DESC,cv2.updated_at DESC LIMIT 1)
+        WHERE c.brand_id=? AND c.deleted_at IS NULL
+          ${assigneeUserId ? 'AND l.assignee_erp_user_id=?' : ''}
+        ORDER BY c.updated_at DESC,c.display_name`,
+      assigneeUserId ? [brandId, assigneeUserId] : [brandId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.display_name,
+      phone: row.phone_e164,
+      email: row.email ?? '',
+      city: row.city ?? '',
+      source: row.source ?? '',
+      ...(row.conversation_id ? { conversationId: row.conversation_id } : {}),
+      ...(row.lead_id ? { leadId: row.lead_id } : {}),
+      ...(row.assignee_name ? { assignee: row.assignee_name } : {}),
+    }));
+  }
+
+  async importContacts(brandId: number, contacts: Array<{ name: string; phone: string }>): Promise<ContactImportResult> {
+    await this.ensureBrand(brandId);
+    if (!contacts.length) return { imported: 0, created: 0, updated: 0, duplicates: 0 };
+    const unique = new Map<string, { name: string; phone: string }>();
+    for (const contact of contacts) unique.set(contact.phone, contact);
+    const items = [...unique.values()];
+    const placeholders = items.map(() => '?').join(',');
+    const [existingRows] = await this.pool.execute<(RowDataPacket & { phone_e164: string })[]>(
+      `SELECT phone_e164 FROM crm_contacts WHERE brand_id=? AND phone_e164 IN (${placeholders})`,
+      [brandId, ...items.map((item) => item.phone)],
+    );
+    const existing = new Set(existingRows.map((row) => row.phone_e164));
+    const values = items.map(() => `(UNHEX(REPLACE(?, '-', '')),?,?,?,'Impor massal')`).join(',');
+    const parameters = items.flatMap((item) => [randomUUID(), brandId, item.phone, item.name]);
+    await this.pool.execute(
+      `INSERT INTO crm_contacts (id,brand_id,phone_e164,display_name,source) VALUES ${values}
+       ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),source=COALESCE(source,VALUES(source)),deleted_at=NULL`,
+      parameters,
+    );
+    const created = items.filter((item) => !existing.has(item.phone)).length;
+    return {
+      imported: items.length,
+      created,
+      updated: items.length - created,
+      duplicates: contacts.length - items.length,
+    };
+  }
+
+  async syncWhatsappContacts(brandId: number, contacts: Array<{ name: string; phone: string; jid: string; aliases: string[] }>): Promise<void> {
+    await this.ensureBrand(brandId);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const contact of contacts) {
+        const aliases = [...new Set(contact.aliases.filter((alias) => alias !== contact.jid))];
+        const aliasPlaceholders = aliases.map(() => '?').join(',');
+        const [targetRows] = await connection.execute<(RowDataPacket & { id: Buffer })[]>(
+          `SELECT id FROM crm_contacts WHERE brand_id=? AND phone_e164=? LIMIT 1 FOR UPDATE`,
+          [brandId, contact.phone],
+        );
+        const [aliasRows] = aliases.length
+          ? await connection.execute<(RowDataPacket & { id: Buffer; contact_id: Buffer })[]>(
+              `SELECT id,contact_id FROM crm_conversations WHERE brand_id=? AND whatsapp_jid IN (${aliasPlaceholders}) LIMIT 1 FOR UPDATE`,
+              [brandId, ...aliases],
+            )
+          : [[]];
+        const targetId = targetRows[0]?.id;
+        const aliasConversationId = aliasRows[0]?.id;
+        const aliasId = aliasRows[0]?.contact_id;
+        if (aliasId && (!targetId || !aliasId.equals(targetId))) {
+          if (targetId) {
+            await connection.execute(`UPDATE crm_leads SET contact_id=? WHERE brand_id=? AND contact_id=?`, [targetId, brandId, aliasId]);
+            const [targetConversationRows] = await connection.execute<(RowDataPacket & { id: Buffer })[]>(
+              `SELECT id FROM crm_conversations WHERE brand_id=? AND whatsapp_jid=? LIMIT 1 FOR UPDATE`,
+              [brandId, contact.jid],
+            );
+            const targetConversationId = targetConversationRows[0]?.id;
+            if (targetConversationId && aliasConversationId && !targetConversationId.equals(aliasConversationId)) {
+              await connection.execute(
+                `UPDATE crm_messages SET conversation_id=? WHERE brand_id=? AND conversation_id=?`,
+                [targetConversationId, brandId, aliasConversationId],
+              );
+              await connection.execute(
+                `UPDATE crm_conversations target
+                   JOIN crm_conversations source ON source.id=? AND source.brand_id=target.brand_id
+                    SET target.last_message_preview=IF(source.last_message_at>target.last_message_at OR target.last_message_at IS NULL,source.last_message_preview,target.last_message_preview),
+                        target.last_message_at=CASE
+                          WHEN source.last_message_at IS NULL THEN target.last_message_at
+                          WHEN target.last_message_at IS NULL OR source.last_message_at>target.last_message_at THEN source.last_message_at
+                          ELSE target.last_message_at END,
+                        target.unread_count=target.unread_count+source.unread_count
+                  WHERE target.brand_id=? AND target.id=?`,
+                [aliasConversationId, brandId, targetConversationId],
+              );
+              await connection.execute(`DELETE FROM crm_conversations WHERE brand_id=? AND id=?`, [brandId, aliasConversationId]);
+            } else {
+              await connection.execute(`UPDATE crm_conversations SET contact_id=?,whatsapp_jid=? WHERE brand_id=? AND contact_id=?`, [targetId, contact.jid, brandId, aliasId]);
+            }
+            await connection.execute(`DELETE FROM crm_contacts WHERE brand_id=? AND id=?`, [brandId, aliasId]);
+          } else {
+            await connection.execute(
+              `UPDATE crm_contacts SET phone_e164=?,display_name=IF(display_name=phone_e164 OR display_name='',?,display_name),source=COALESCE(source,'WhatsApp'),deleted_at=NULL WHERE brand_id=? AND id=?`,
+              [contact.phone, contact.name, brandId, aliasId],
+            );
+            await connection.execute(`UPDATE crm_conversations SET whatsapp_jid=? WHERE brand_id=? AND contact_id=?`, [contact.jid, brandId, aliasId]);
+          }
+        } else if (targetId) {
+          await connection.execute(
+            `UPDATE crm_contacts SET display_name=IF(display_name=phone_e164 OR display_name='',?,display_name),source=COALESCE(source,'WhatsApp'),deleted_at=NULL WHERE brand_id=? AND id=?`,
+            [contact.name, brandId, targetId],
+          );
+        } else {
+          await connection.execute(
+            `INSERT INTO crm_contacts (id,brand_id,phone_e164,display_name,source) VALUES (UNHEX(REPLACE(?, '-', '')),?,?,?,'WhatsApp')`,
+            [randomUUID(), brandId, contact.phone, contact.name],
+          );
+        }
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
   async listLeads(brandId: number, assigneeUserId?: number): Promise<Lead[]> {
     await this.ensureBrand(brandId);
     const [rows] = await this.pool.execute<LeadRow[]>(
@@ -636,7 +791,7 @@ export class MySqlCrmStore {
   async listConversations(brandId: number, assigneeUserId?: number): Promise<Conversation[]> {
     const [rows] = await this.pool.execute<ConversationRow[]>(
       `SELECT LOWER(CONCAT(SUBSTRING(HEX(cv.id),1,8),'-',SUBSTRING(HEX(cv.id),9,4),'-',SUBSTRING(HEX(cv.id),13,4),'-',SUBSTRING(HEX(cv.id),17,4),'-',SUBSTRING(HEX(cv.id),21,12))) AS id, cv.brand_id, LOWER(CONCAT(SUBSTRING(HEX(cv.lead_id),1,8),'-',SUBSTRING(HEX(cv.lead_id),9,4),'-',SUBSTRING(HEX(cv.lead_id),13,4),'-',SUBSTRING(HEX(cv.lead_id),17,4),'-',SUBSTRING(HEX(cv.lead_id),21,12))) AS lead_id,
-              c.display_name, c.phone_e164, cv.last_message_preview, cv.last_message_at,
+              c.display_name, c.phone_e164, cv.whatsapp_jid, cv.last_message_preview, cv.last_message_at,
               cv.unread_count, l.assignee_erp_user_id, l.assignee_name
          FROM crm_conversations cv
          JOIN crm_contacts c ON c.id=cv.contact_id AND c.brand_id=cv.brand_id
@@ -652,6 +807,7 @@ export class MySqlCrmStore {
       leadId: row.lead_id,
       name: row.display_name,
       phone: row.phone_e164,
+      phoneResolved: row.whatsapp_jid.endsWith('@s.whatsapp.net'),
       avatarSeed: row.display_name,
       lastMessage: row.last_message_preview ?? '',
       lastMessageAt: toIso(row.last_message_at),
@@ -670,7 +826,7 @@ export class MySqlCrmStore {
       [brandId, conversationId],
     );
     const jid = conversations[0]?.whatsapp_jid;
-    if (!jid) return null;
+    if (!jid?.endsWith('@s.whatsapp.net')) return null;
     const [messages] = await this.pool.execute<(RowDataPacket & { whatsapp_message_id: string })[]>(
       `SELECT whatsapp_message_id FROM crm_messages
         WHERE brand_id=? AND conversation_id=UNHEX(REPLACE(?, '-', '')) AND direction='inbound'
@@ -769,16 +925,17 @@ export class MySqlCrmStore {
     const sentAt = new Date().toISOString();
     try {
       await connection.beginTransaction();
-      const [rows] = await connection.execute<(RowDataPacket & { phone_e164: string })[]>(
-        `SELECT c.phone_e164 FROM crm_conversations cv JOIN crm_contacts c ON c.id=cv.contact_id
+      const [rows] = await connection.execute<(RowDataPacket & { whatsapp_jid: string })[]>(
+        `SELECT cv.whatsapp_jid FROM crm_conversations cv
           WHERE cv.brand_id=? AND cv.id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, conversationId],
       );
-      const phone = rows[0]?.phone_e164;
-      if (!phone) {
+      const jid = rows[0]?.whatsapp_jid;
+      if (!jid?.endsWith('@s.whatsapp.net')) {
         await connection.rollback();
         return null;
       }
+      const phone = jid.split('@')[0] ?? '';
       await connection.execute(
         `INSERT INTO crm_messages
            (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,status,sent_at)
@@ -815,16 +972,17 @@ export class MySqlCrmStore {
     const sentAt = new Date().toISOString();
     try {
       await connection.beginTransaction();
-      const [rows] = await connection.execute<(RowDataPacket & { phone_e164: string })[]>(
-        `SELECT c.phone_e164 FROM crm_conversations cv JOIN crm_contacts c ON c.id=cv.contact_id
+      const [rows] = await connection.execute<(RowDataPacket & { whatsapp_jid: string })[]>(
+        `SELECT cv.whatsapp_jid FROM crm_conversations cv
           WHERE cv.brand_id=? AND cv.id=UNHEX(REPLACE(?, '-', '')) FOR UPDATE`,
         [brandId, conversationId],
       );
-      const phone = rows[0]?.phone_e164;
-      if (!phone) {
+      const jid = rows[0]?.whatsapp_jid;
+      if (!jid?.endsWith('@s.whatsapp.net')) {
         await connection.rollback();
         return null;
       }
+      const phone = jid.split('@')[0] ?? '';
       await connection.execute(
         `INSERT INTO crm_messages
            (id,brand_id,conversation_id,whatsapp_message_id,direction,message_type,body,media_object_key,media_mime_type,media_file_name,status,sent_at)
@@ -892,15 +1050,15 @@ export class MySqlCrmStore {
     }
   }
 
-  async completeOutboundJob(job: OutboundMessageJob): Promise<Message | null> {
+  async completeOutboundJob(job: OutboundMessageJob, whatsappMessageId: string): Promise<Message | null> {
     await this.pool.execute(
       `UPDATE crm_outbox_jobs SET status='completed',attempts=attempts+1,locked_at=NULL,locked_by=NULL,last_error=NULL
         WHERE id=UNHEX(REPLACE(?, '-', ''))`,
       [job.id],
     );
     await this.pool.execute(
-      `UPDATE crm_messages SET status='sent',failure_code=NULL WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
-      [job.brandId, job.payload.messageId],
+      `UPDATE crm_messages SET whatsapp_message_id=?,status='sent',failure_code=NULL WHERE brand_id=? AND id=UNHEX(REPLACE(?, '-', ''))`,
+      [whatsappMessageId, job.brandId, job.payload.messageId],
     );
     return this.getMessageById(job.brandId, job.payload.messageId);
   }
@@ -1031,7 +1189,7 @@ export class MySqlCrmStore {
         await connection.execute(
           `INSERT INTO crm_contacts (id, brand_id, phone_e164, display_name, source)
            VALUES (UNHEX(REPLACE(?, '-', '')), ?, ?, ?, 'WhatsApp')
-           ON DUPLICATE KEY UPDATE display_name=IF(display_name='', VALUES(display_name), display_name)`,
+           ON DUPLICATE KEY UPDATE display_name=IF(display_name='' OR display_name=phone_e164, VALUES(display_name), display_name)`,
           [contactId, input.brandId, input.phone, input.name || input.phone],
         );
         const [contactRows] = await connection.execute<(IdRow & { display_name: string })[]>(

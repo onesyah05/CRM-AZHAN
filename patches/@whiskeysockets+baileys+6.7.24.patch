@@ -1,0 +1,46 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/history.js b/node_modules/@whiskeysockets/baileys/lib/Utils/history.js
+index def9742..8ae8f64 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/history.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/history.js
+@@ -23,6 +23,15 @@ export const processHistoryMessage = (item) => {
+     const messages = [];
+     const contacts = [];
+     const chats = [];
++    for (const mapping of item.phoneNumberToLidMappings || []) {
++        if (mapping.pnJid && mapping.lidJid) {
++            contacts.push({
++                id: mapping.pnJid,
++                jid: mapping.pnJid,
++                lid: mapping.lidJid
++            });
++        }
++    }
+     switch (item.syncType) {
+         case proto.HistorySync.HistorySyncType.INITIAL_BOOTSTRAP:
+         case proto.HistorySync.HistorySyncType.RECENT:
+@@ -30,10 +39,10 @@ export const processHistoryMessage = (item) => {
+         case proto.HistorySync.HistorySyncType.ON_DEMAND:
+             for (const chat of item.conversations) {
+                 contacts.push({
+-                    id: chat.id,
+-                    name: chat.name || undefined,
+-                    lid: chat.lidJid || undefined,
+-                    jid: isJidUser(chat.id) ? chat.id : undefined
++                    id: chat.pnJid || chat.id,
++                    name: chat.displayName || chat.name || chat.username || undefined,
++                    lid: chat.lidJid || (chat.id?.endsWith('@lid') ? chat.id : undefined),
++                    jid: chat.pnJid || (isJidUser(chat.id) ? chat.id : undefined)
+                 });
+                 const msgs = chat.messages || [];
+                 delete chat.messages;
+@@ -74,7 +83,9 @@ export const processHistoryMessage = (item) => {
+     };
+ };
+ export const downloadAndProcessHistorySyncNotification = async (msg, options) => {
+-    const historyMsg = await downloadHistory(msg, options);
++    const historyMsg = msg.initialHistBootstrapInlinePayload
++        ? proto.HistorySync.decode(await inflatePromise(msg.initialHistBootstrapInlinePayload))
++        : await downloadHistory(msg, options);
+     return processHistoryMessage(historyMsg);
+ };
+ export const getHistoryMsg = (message) => {

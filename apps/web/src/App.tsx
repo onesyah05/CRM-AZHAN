@@ -30,6 +30,7 @@ function AuthenticatedApp() {
         void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         void queryClient.invalidateQueries({ queryKey: ['messages'] });
         void queryClient.invalidateQueries({ queryKey: ['leads'] });
+        void queryClient.invalidateQueries({ queryKey: ['contacts'] });
         void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       });
       socket.on('message.status.updated', () => {
@@ -42,6 +43,10 @@ function AuthenticatedApp() {
         void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         void queryClient.invalidateQueries({ queryKey: ['messages'] });
         void queryClient.invalidateQueries({ queryKey: ['leads'] });
+        void queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      });
+      socket.on('contacts.synced', () => {
+        void queryClient.invalidateQueries({ queryKey: ['contacts'] });
       });
       socket.on('context.changed', () => {
         void queryClient.invalidateQueries();
@@ -64,7 +69,7 @@ function AuthenticatedApp() {
         <Route path="/" element={<DashboardPage user={context.data} />} />
         <Route path="/conversations" element={<ConversationsPage user={context.data} />} />
         <Route path="/pipeline" element={<PipelinePage />} />
-        <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/contacts" element={<ContactsPage canImport={context.data.role !== 'sales'} />} />
         <Route path="/activities" element={<ActivitiesPage />} />
         <Route path="/team" element={context.data.role === 'sales' ? <Navigate to="/" replace /> : <TeamPage />} />
         <Route path="/settings/whatsapp" element={context.data.role === 'sales' ? <Navigate to="/" replace /> : <WhatsappSettingsPage user={context.data} />} />

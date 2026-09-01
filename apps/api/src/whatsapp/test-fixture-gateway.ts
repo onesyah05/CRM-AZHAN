@@ -1,5 +1,5 @@
 import type { MessageStatus, WhatsAppStatus } from '@azhan-crm/contracts';
-import type { HistoricalWhatsAppMessage, IncomingWhatsAppMessage, WhatsAppGateway, WhatsAppPresenceUpdate } from './gateway.js';
+import type { HistoricalWhatsAppContact, HistoricalWhatsAppMessage, IncomingWhatsAppMessage, WhatsAppGateway, WhatsAppPresenceUpdate } from './gateway.js';
 
 export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
   private status: WhatsAppStatus = {
@@ -47,6 +47,10 @@ export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
 
   async markRead(): Promise<void> {}
 
+  async getProfilePicture(): Promise<null> {
+    return null;
+  }
+
   getPresence(): { presence: 'offline' } {
     return { presence: 'offline' };
   }
@@ -60,6 +64,8 @@ export class TestFixtureWhatsAppGateway implements WhatsAppGateway {
   }
 
   onHistory(_handler: (messages: HistoricalWhatsAppMessage[]) => Promise<void>): void {}
+
+  onContacts(_handler: (contacts: HistoricalWhatsAppContact[]) => Promise<void>): void {}
 
   onStatus(handler: (update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>): void {
 	this.statusHandler = handler;

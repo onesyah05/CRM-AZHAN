@@ -109,6 +109,7 @@ export interface Conversation {
   leadId: string;
   name: string;
   phone: string;
+  phoneResolved?: boolean;
   avatarSeed: string;
   lastMessage: string;
   lastMessageAt: string;
@@ -119,6 +120,25 @@ export interface Conversation {
   online: boolean;
   presence: ContactPresence;
   lastSeenAt?: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  city: string;
+  source: string;
+  conversationId?: string;
+  leadId?: string;
+  assignee?: string;
+}
+
+export interface ContactImportResult {
+  imported: number;
+  created: number;
+  updated: number;
+  duplicates: number;
 }
 
 export interface Message {

@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "concurrently -n api,web -c cyan,blue \"npm run dev -w @azhan-crm/api\" \"npm run dev -w @azhan-crm/web\"",
     "dev:api": "npm run dev -w @azhan-crm/api",
     "dev:web": "npm run dev -w @azhan-crm/web",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "concurrently": "9.2.4",
     "oxlint": "1.75.0",
+    "patch-package": "8.0.1",
     "tsx": "4.20.5",
     "typescript": "5.9.2"
   },

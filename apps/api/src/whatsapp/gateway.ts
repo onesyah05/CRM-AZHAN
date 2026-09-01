@@ -24,6 +24,14 @@ export interface HistoricalWhatsAppMessage extends IncomingWhatsAppMessage {
   status: MessageStatus;
 }
 
+export interface HistoricalWhatsAppContact {
+  sessionId: number;
+  phone: string;
+  jid: string;
+  aliases: string[];
+  name: string;
+}
+
 export interface WhatsAppGateway {
   restoreConnections(): Promise<void>;
   connect(sessionId: number): Promise<void>;
@@ -33,10 +41,12 @@ export interface WhatsAppGateway {
   subscribePresence(sessionId: number, phone: string): Promise<void>;
   sendPresence(sessionId: number, phone: string, presence: 'composing' | 'paused'): Promise<void>;
   markRead(sessionId: number, phone: string, messageIds: string[]): Promise<void>;
+  getProfilePicture(sessionId: number, phone: string): Promise<{ data: Buffer; mimeType: string } | null>;
   getPresence(sessionId: number, phone: string): Omit<WhatsAppPresenceUpdate, 'sessionId' | 'phone'>;
   getStatus(sessionId: number): WhatsAppStatus;
   onIncoming(handler: (message: IncomingWhatsAppMessage) => Promise<void>): void;
   onHistory(handler: (messages: HistoricalWhatsAppMessage[]) => Promise<void>): void;
+  onContacts(handler: (contacts: HistoricalWhatsAppContact[]) => Promise<void>): void;
   onStatus(handler: (update: { sessionId: number; messageId: string; status: MessageStatus }) => Promise<void>): void;
   onPresence(handler: (update: WhatsAppPresenceUpdate) => void): void;
 }

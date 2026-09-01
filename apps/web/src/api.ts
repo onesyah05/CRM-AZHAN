@@ -2,6 +2,8 @@ import type {
   ApiErrorShape,
   Activity,
   Conversation,
+  Contact,
+  ContactImportResult,
   DashboardMetrics,
   DashboardPeriod,
   DealRequest,
@@ -88,6 +90,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   conversations: () => request<Conversation[]>('/api/v1/conversations'),
+  contacts: () => request<Contact[]>('/api/v1/contacts'),
+  importContacts: (contacts: Array<{ name: string; phone: string }>) =>
+    request<ContactImportResult>('/api/v1/contacts/import', { method: 'POST', body: JSON.stringify({ contacts }) }),
   messages: (conversationId: string) => request<Message[]>(`/api/v1/conversations/${conversationId}/messages`),
   sendMessage: (conversationId: string, body: string) =>
     request<Message>(`/api/v1/conversations/${conversationId}/messages`, {

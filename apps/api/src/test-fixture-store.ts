@@ -1,6 +1,8 @@
 import type {
   Activity,
   Conversation,
+  Contact,
+  ContactImportResult,
   DashboardMetrics,
   DashboardPeriod,
   DealRequest,
@@ -162,6 +164,17 @@ export class TestFixtureStore {
   private readonly messages = structuredClone(baseMessages);
   private readonly activities = structuredClone(baseActivities);
   private readonly conversions = new Map<string, DealResult>();
+  private readonly contacts: Contact[] = baseLeads.map((lead) => ({
+    id: lead.contactId,
+    name: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    city: lead.city,
+    source: lead.source,
+    conversationId: lead.conversationId,
+    leadId: lead.id,
+    assignee: lead.assignee,
+  }));
   private readonly teamMembers: TeamMember[] = [
     { userId: 11, brandId: 1, email: 'aulia@fixture.test', displayName: 'Aulia', allocationPercent: 40, allocatedInCycle: 3, rotationPosition: 1, isActive: true },
     { userId: 12, brandId: 1, email: 'fikri@fixture.test', displayName: 'Fikri', allocationPercent: 30, allocatedInCycle: 2, rotationPosition: 2, isActive: true },
@@ -208,6 +221,26 @@ export class TestFixtureStore {
 
   listSchedules(): Schedule[] {
     return structuredClone(schedules);
+  }
+
+  listContacts(_brandId: number, assigneeUserId?: number): Contact[] {
+    if (!assigneeUserId) return structuredClone(this.contacts);
+    const allowedLeadIds = new Set(this.leads.filter((lead) => lead.assigneeUserId === assigneeUserId).map((lead) => lead.id));
+    return structuredClone(this.contacts.filter((contact) => contact.leadId && allowedLeadIds.has(contact.leadId)));
+  }
+
+  importContacts(_brandId: number, contacts: Array<{ name: string; phone: string }>): ContactImportResult {
+    const unique = new Map(contacts.map((contact) => [contact.phone, contact]));
+    let created = 0;
+    for (const contact of unique.values()) {
+      const existing = this.contacts.find((item) => item.phone === contact.phone);
+      if (existing) existing.name = contact.name;
+      else {
+        created += 1;
+        this.contacts.unshift({ id: `contact-${crypto.randomUUID()}`, name: contact.name, phone: contact.phone, email: '', city: '', source: 'Impor massal' });
+      }
+    }
+    return { imported: unique.size, created, updated: unique.size - created, duplicates: contacts.length - unique.size };
   }
 
   listLeads(brandId: number, assigneeUserId?: number): Lead[] {

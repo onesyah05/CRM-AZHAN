@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CalendarDays, Check, CheckCheck, ChevronLeft, Clock3, FileText, Filter, Info, PackageOpen, Paperclip, Search, Send, TicketCheck, UserRound } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, CheckCheck, ChevronLeft, Clock3, FileText, FileWarning, Filter, Info, PackageOpen, Paperclip, Search, Send, TicketCheck, UserRound } from 'lucide-react';
 import type { Lead, Message, UserContext } from '@azhan-crm/contracts';
 import { useSearchParams } from 'react-router-dom';
 import { api, ApiClientError } from '../api';
@@ -8,6 +8,57 @@ import { Avatar, EmptyState, ErrorState, LoadingState, TagPill } from '../compon
 import { DealWizard } from '../components/DealWizard';
 import { LeadDrawer } from '../components/LeadDrawer';
 import { formatDateTime, formatRelativeTime } from '../utils';
+
+const crmTimeZone = 'Asia/Jakarta';
+
+export function messageDayKey(value: string | Date): string {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: crmTimeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export function messageDayLabel(value: string, now = new Date()): string {
+  const date = new Date(value);
+  const today = now;
+  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1_000);
+  const key = messageDayKey(date);
+  if (key === messageDayKey(today)) return 'Hari ini';
+  if (key === messageDayKey(yesterday)) return 'Kemarin';
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: crmTimeZone,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+function messageTime(value: string): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: crmTimeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function MessageAttachment({ message, onLoad }: { message: Message; onLoad: () => void }) {
+  const [unavailable, setUnavailable] = useState(false);
+  useEffect(() => setUnavailable(false), [message.id, message.mediaUrl]);
+  if (message.type === 'text') return null;
+  if (!message.mediaUrl || unavailable) {
+    const typeName = message.type === 'image' ? 'Gambar' : message.type === 'video' ? 'Video' : message.type === 'audio' ? 'Audio' : 'File';
+    return <div className="message-media-missing"><FileWarning size={22} /><span><strong>{typeName} tidak tersedia</strong><small>File media sudah tidak ada atau kedaluwarsa.</small></span></div>;
+  }
+  if (message.type === 'image') return <a href={message.mediaUrl} target="_blank" rel="noreferrer"><img className="message-media-image" src={message.mediaUrl} alt={message.fileName ?? 'Lampiran gambar'} onLoad={onLoad} onError={() => setUnavailable(true)} /></a>;
+  if (message.type === 'video') return <video className="message-media-video" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran video'} onLoadedMetadata={onLoad} onError={() => setUnavailable(true)} />;
+  if (message.type === 'audio') return <audio className="message-media-audio" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran audio'} onLoadedMetadata={onLoad} onError={() => setUnavailable(true)} />;
+  return <a className="message-document" href={message.mediaUrl} target="_blank" rel="noreferrer"><FileText size={18} />{message.fileName ?? 'Buka dokumen'}</a>;
+}
 
 export function ConversationsPage({ user }: { user: UserContext }) {
   const [searchParams] = useSearchParams();
@@ -26,6 +77,8 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [dealLead, setDealLead] = useState<Lead | null>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
+	const messageHistory = useRef<HTMLDivElement>(null);
+	const messageEnd = useRef<HTMLDivElement>(null);
 	const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const typingConversation = useRef<string | null>(null);
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
@@ -68,7 +121,31 @@ export function ConversationsPage({ user }: { user: UserContext }) {
   const selected = conversations.data?.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedLead = leads.data?.find((lead) => lead.id === selected?.leadId) ?? null;
   const whatsappConnected = whatsappStatus.data?.status === 'connected';
+  const conversationReady = selected?.phoneResolved !== false;
+  const canSend = whatsappConnected && conversationReady;
   const activeFilterCount = [unreadOnly, assignedOnly, assigneeFilter !== 'all', stageFilter !== 'all', tagFilter !== 'all', periodFilter !== 'all'].filter(Boolean).length;
+  const messageGroups = useMemo(() => {
+    const groups: Array<{ key: string; label: string; messages: Message[] }> = [];
+    for (const message of messages.data ?? []) {
+      const key = messageDayKey(message.sentAt);
+      const current = groups.at(-1);
+      if (current?.key === key) current.messages.push(message);
+      else groups.push({ key, label: messageDayLabel(message.sentAt), messages: [message] });
+    }
+    return groups;
+  }, [messages.data]);
+  const scrollToLatest = useCallback(() => {
+    const history = messageHistory.current;
+    if (history) history.scrollTop = history.scrollHeight;
+    else messageEnd.current?.scrollIntoView({ block: 'end' });
+  }, []);
+
+  useEffect(() => {
+    if (messages.isLoading || !selectedId) return;
+    const frame = requestAnimationFrame(scrollToLatest);
+    const timer = window.setTimeout(scrollToLatest, 120);
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [messages.data?.length, messages.isLoading, scrollToLatest, selectedId]);
   const resetConversationFilters = () => {
     setUnreadOnly(false);
     setAssignedOnly(false);
@@ -89,7 +166,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
 
   const updateComposer = (value: string) => {
 	setComposer(value);
-	if (!selectedId || !whatsappConnected) return;
+	if (!selectedId || !canSend) return;
 	if (typingTimer.current) clearTimeout(typingTimer.current);
 	if (!value.trim()) {
 	  pauseTyping(selectedId);
@@ -165,7 +242,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
         <div className="conversation-list">
           {filtered.map((conversation) => (
             <button key={conversation.id} className={`conversation-row ${selectedId === conversation.id ? 'conversation-row--active' : ''}`} onClick={() => setSelectedId(conversation.id)} aria-pressed={selectedId === conversation.id}>
-              <span className="avatar-wrap"><Avatar name={conversation.name} />{conversation.online ? <i className="online-dot" /> : null}</span>
+              <span className="avatar-wrap"><Avatar name={conversation.name} src={`/api/v1/conversations/${conversation.id}/avatar`} />{conversation.online ? <i className="online-dot" /> : null}</span>
               <span className="conversation-row__content">
                 <span className="conversation-row__top"><strong>{conversation.name}</strong><time>{formatRelativeTime(conversation.lastMessageAt)}</time></span>
                 <span className="conversation-preview">{conversation.lastMessage}</span>
@@ -183,42 +260,52 @@ export function ConversationsPage({ user }: { user: UserContext }) {
           <>
             <header className="message-header">
               <button className="icon-button message-header__back" onClick={() => setSelectedId(null)} aria-label="Kembali ke daftar"><ChevronLeft /></button>
-              <Avatar name={selected.name} />
-              <div className="message-header__identity"><strong>{selected.name}</strong><span>{selected.online ? <i className="online-dot" /> : null}{selected.presence === 'typing' ? 'Sedang mengetik…' : selected.presence === 'recording' ? 'Sedang merekam audio…' : selected.presence === 'online' ? 'Online' : 'WhatsApp'} · {selected.phone}</span></div>
+              <Avatar name={selected.name} src={`/api/v1/conversations/${selected.id}/avatar`} />
+              <div className="message-header__identity"><strong>{selected.name}</strong><span>{selected.online ? <i className="online-dot" /> : null}{selected.presence === 'typing' ? 'Sedang mengetik…' : selected.presence === 'recording' ? 'Sedang merekam audio…' : selected.presence === 'online' ? 'Online' : 'WhatsApp'} · {conversationReady ? selected.phone : 'Nomor sedang disinkronkan'}</span></div>
               <div className="message-header__actions"><button className={`icon-button ${profileOpen ? 'icon-button--active' : ''}`} onClick={() => setProfileOpen((value) => !value)} aria-pressed={profileOpen} aria-label="Tampilkan profil lead"><Info size={19} /></button></div>
             </header>
-            <div className="message-history" aria-live="polite">
-              <div className="message-day">Hari ini</div>
-              {messages.isLoading ? <LoadingState label="Memuat pesan…" /> : messages.data?.map((message) => (
-                <div key={message.id} className={`message-bubble-wrap message-bubble-wrap--${message.direction}`}>
-				  <div className="message-bubble">
-					{message.type === 'image' && message.mediaUrl ? <a href={message.mediaUrl} target="_blank" rel="noreferrer"><img className="message-media-image" src={message.mediaUrl} alt={message.fileName ?? 'Lampiran gambar'} /></a> : null}
-					{message.type === 'video' && message.mediaUrl ? <video className="message-media-video" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran video'} /> : null}
-					{message.type === 'audio' && message.mediaUrl ? <audio className="message-media-audio" src={message.mediaUrl} controls preload="metadata" aria-label={message.fileName ?? 'Lampiran audio'} /> : null}
-					{message.type === 'document' && message.mediaUrl ? <a className="message-document" href={message.mediaUrl} target="_blank" rel="noreferrer"><FileText size={18} />{message.fileName ?? 'Buka dokumen'}</a> : null}
-					{message.body ? <p>{message.body}</p> : null}
-					<span>{new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.sentAt))}{message.direction === 'outbound' ? statusIcon(message) : null}</span>
-					{message.status === 'failed' ? <button className="message-retry" onClick={() => retryMutation.mutate(message.id)}>Coba lagi</button> : null}
-				  </div>
-                </div>
+            <div ref={messageHistory} className="message-history" aria-live="polite">
+              {messages.isLoading ? <LoadingState label="Memuat pesan…" /> : messageGroups.map((group) => (
+                <Fragment key={group.key}>
+                  <div className="message-day">{group.label}</div>
+                  {group.messages.map((message) => {
+                    const genericMediaBody = message.type === 'image' && message.body === 'Gambar'
+                      || message.type === 'video' && message.body === 'Video'
+                      || message.type === 'audio' && message.body === 'Pesan audio'
+                      || message.type === 'document' && message.body === message.fileName;
+                    return (
+                      <div key={message.id} className={`message-bubble-wrap message-bubble-wrap--${message.direction}`}>
+				        <div className="message-bubble">
+				          <MessageAttachment message={message} onLoad={scrollToLatest} />
+				          {message.body && !genericMediaBody ? <p>{message.body}</p> : null}
+				          <span>{messageTime(message.sentAt)}{message.direction === 'outbound' ? statusIcon(message) : null}</span>
+				          {message.status === 'failed' ? <button className="message-retry" onClick={() => retryMutation.mutate(message.id)}>Coba lagi</button> : null}
+				        </div>
+                      </div>
+                    );
+                  })}
+                </Fragment>
               ))}
               {!messages.isLoading && !messages.data?.length ? <EmptyState title="Belum ada pesan" description="Mulai percakapan dari kolom balasan di bawah." /> : null}
+              <div ref={messageEnd} className="message-history__end" aria-hidden="true" />
             </div>
-            <form className="composer" onSubmit={(event) => { event.preventDefault(); if (composer.trim()) sendMutation.mutate(); }}>
+            <form className="composer" onSubmit={(event) => { event.preventDefault(); if (canSend && composer.trim()) sendMutation.mutate(); }}>
               {!whatsappConnected ? <div className="composer-warning" role="status">WhatsApp tidak terhubung. Histori tetap dapat dibaca, tetapi pengiriman dinonaktifkan. <a href="/settings/whatsapp">Periksa koneksi</a></div> : null}
+              {whatsappConnected && !conversationReady ? <div className="composer-warning" role="status">Nomor kontak lama masih disinkronkan. Tunggu sinkronisasi histori selesai sebelum mengirim pesan.</div> : null}
               {sendMutation.error || mediaMutation.error ? <div className="composer-error" role="alert">{(sendMutation.error ?? mediaMutation.error) instanceof ApiClientError ? (sendMutation.error ?? mediaMutation.error)?.message : 'Pesan belum terkirim.'}</div> : null}
               <div className="composer__box">
-                <button type="button" className="icon-button" disabled={!whatsappConnected || mediaMutation.isPending} aria-label="Lampirkan file" onClick={() => fileInput.current?.click()}><Paperclip size={19} /></button>
+                <button type="button" className="icon-button" disabled={!canSend || mediaMutation.isPending} aria-label="Lampirkan file" onClick={() => fileInput.current?.click()}><Paperclip size={19} /></button>
                 <input ref={fileInput} hidden type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) mediaMutation.mutate(file); event.currentTarget.value = ''; }} />
                 <textarea
                   value={composer}
                   onChange={(event) => updateComposer(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (composer.trim()) sendMutation.mutate(); } }}
+                  disabled={!conversationReady}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (canSend && composer.trim()) sendMutation.mutate(); } }}
                   placeholder="Tulis balasan WhatsApp…"
                   rows={1}
                   aria-label="Pesan WhatsApp"
                 />
-                <button className="send-button" disabled={!whatsappConnected || !composer.trim() || sendMutation.isPending || mediaMutation.isPending} aria-label="Kirim pesan"><Send size={18} /></button>
+                <button className="send-button" disabled={!canSend || !composer.trim() || sendMutation.isPending || mediaMutation.isPending} aria-label="Kirim pesan"><Send size={18} /></button>
               </div>
               <small>Enter untuk kirim · Shift+Enter untuk baris baru</small>
             </form>
@@ -230,7 +317,7 @@ export function ConversationsPage({ user }: { user: UserContext }) {
         {selectedLead ? (
           <>
             <header className="contact-panel__header"><span>Profil lead</span><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Tutup panel profil"><Info size={18} /></button></header>
-            <div className="contact-identity"><Avatar name={selectedLead.name} size="lg" /><h2>{selectedLead.name}</h2><p>{selectedLead.phone}</p><div>{selectedLead.tags.map((tag) => <TagPill key={tag.id} tag={tag} />)}</div></div>
+            <div className="contact-identity"><Avatar name={selectedLead.name} size="lg" {...(selected ? { src: `/api/v1/conversations/${selected.id}/avatar` } : {})} /><h2>{selectedLead.name}</h2><p>{conversationReady ? selectedLead.phone : 'Nomor sedang disinkronkan'}</p><div>{selectedLead.tags.map((tag) => <TagPill key={tag.id} tag={tag} />)}</div></div>
             <div className="contact-properties">
               <div><span><UserRound size={16} /> PIC</span><strong>{selectedLead.assignee}</strong></div>
               <div><span><TicketCheck size={16} /> Tahap</span><strong>{stages.data?.find((stage) => stage.id === selectedLead.stageId)?.name}</strong></div>

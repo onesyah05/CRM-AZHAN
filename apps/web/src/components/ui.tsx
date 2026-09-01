@@ -1,14 +1,16 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, Inbox, LoaderCircle, X } from 'lucide-react';
 import type { Tag } from '@azhan-crm/contracts';
 import { initials } from '../utils';
 
-export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
+export function Avatar({ name, size = 'md', src }: { name: string; size?: 'sm' | 'md' | 'lg'; src?: string }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const colors = ['#2F6FED', '#7C3AED', '#137548', '#C24175', '#B65C00'];
   const index = [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) % colors.length;
+  useEffect(() => setImageFailed(false), [src]);
   return (
     <span className={`avatar avatar--${size}`} style={{ backgroundColor: colors[index] }} aria-hidden="true">
-      {initials(name)}
+      {src && !imageFailed ? <img src={src} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : initials(name)}
     </span>
   );
 }

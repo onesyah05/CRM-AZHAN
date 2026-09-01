@@ -34,6 +34,15 @@ test('dashboard dan inbox fixture dapat digunakan', async ({ page }) => {
 
 test('kontak, filter inbox, dan aktivitas dapat digunakan', async ({ page }) => {
   await page.goto('/contacts');
+  await page.getByRole('button', { name: 'Impor kontak' }).click();
+  await page.getByLabel('Daftar kontak').fill('Jamaah Baru|081234560099');
+  await page.getByRole('button', { name: 'Impor kontak', exact: true }).last().click();
+  await expect(page.getByText('1 kontak diproses')).toBeVisible();
+  await page.getByRole('button', { name: 'Selesai' }).click();
+  await page.getByPlaceholder('Cari nama atau nomor…').fill('Jamaah Baru');
+  await expect(page.getByText('Jamaah Baru', { exact: true })).toBeVisible();
+  await expect(page.getByText('Kontak tersimpan')).toBeVisible();
+
   await page.getByPlaceholder('Cari nama atau nomor…').fill('Nadia');
   await expect(page.getByText('Nadia Rahma', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Buka percakapan Nadia Rahma' }).click();

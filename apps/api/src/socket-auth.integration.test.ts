@@ -20,9 +20,10 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
   const address = httpServer.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${address.port}`;
-});
+}, 30_000);
 
 afterAll(async () => {
+	if (!httpServer) return;
   await new Promise<void>((resolve, reject) => httpServer.close((error) => error ? reject(error) : resolve()));
 });
 

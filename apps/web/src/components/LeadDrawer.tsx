@@ -77,7 +77,7 @@ export function LeadDrawer({
     <Dialog title="Detail lead" description="Lihat konteks dan perbarui kebutuhan calon jamaah." onClose={requestClose} size="lg">
       <div className="lead-detail">
         <section className="lead-summary-card">
-          <Avatar name={form.name} size="lg" />
+          <Avatar name={form.name} size="lg" {...(lead.conversationId ? { src: `/api/v1/conversations/${lead.conversationId}/avatar` } : {})} />
           <div className="lead-summary-card__identity"><h3>{form.name}</h3><p>{form.phone}</p><div>{form.tags.map((tag) => <TagPill key={tag.id} tag={tag} />)}</div></div>
           <span className="stage-badge" style={{ '--stage-color': stage?.color ?? '#64748B' } as React.CSSProperties}>{stage?.name}</span>
         </section>

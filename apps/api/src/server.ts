@@ -1123,7 +1123,8 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 });
 
 if (config.nodeEnv !== 'test' || config.startServer) {
-  httpServer.listen(config.apiPort, () => {
+  // Keep the CRM API private; Nginx is the only public entry point.
+  httpServer.listen(config.apiPort, '127.0.0.1', () => {
     logger.info({ port: config.apiPort, mode: config.testFixtures ? 'test' : 'integration' }, 'Azhan CRM API ready');
 	void whatsapp.restoreConnections().catch((error) => logger.error({
 	  eventType: 'whatsapp_restore_connections_failed',

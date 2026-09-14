@@ -37,6 +37,23 @@ afterAll(async () => {
 });
 
 describe('MySqlCrmStore', () => {
+  it('mendukung beberapa perangkat WhatsApp dan penugasan CS per perangkat', async () => {
+    const brandId = 707;
+    await store.syncTeamMembers(brandId, [
+      { userId: 71, email: 'wa-one@example.test', displayName: 'WA One', isActive: true },
+      { userId: 72, email: 'wa-two@example.test', displayName: 'WA Two', isActive: true },
+    ]);
+    const primary = await store.ensureDefaultWhatsappSession(brandId);
+    const secondary = await store.createWhatsappSession(brandId, 'WhatsApp Cabang');
+    await store.setWhatsappSessionAssignments(brandId, secondary.id, [72]);
+    const sessions = await store.listWhatsappSessions(brandId);
+    expect(sessions).toHaveLength(2);
+    expect(sessions.find((session) => session.id === primary.id)?.isDefault).toBe(true);
+    expect(sessions.find((session) => session.id === secondary.id)?.assignedUserIds).toEqual([72]);
+    await expect(store.canUserManageWhatsappSession(brandId, secondary.id, 72)).resolves.toBe(true);
+    await expect(store.canUserManageWhatsappSession(brandId, secondary.id, 71)).resolves.toBe(false);
+  });
+
   it('membagikan 100 lead sesuai rotasi kuota 10/40/30/20', async () => {
     const brandId = 303;
     await store.syncTeamMembers(brandId, [

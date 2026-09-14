@@ -120,6 +120,19 @@ export interface Conversation {
   online: boolean;
   presence: ContactPresence;
   lastSeenAt?: string;
+  whatsappSessionId?: number;
+  whatsappSessionLabel?: string;
+  whatsappSessionPhone?: string;
+}
+
+export interface WhatsAppSession {
+  id: number;
+  brandId: number;
+  label: string;
+  isDefault: boolean;
+  phone?: string;
+  status: WhatsAppStatus;
+  assignedUserIds: number[];
 }
 
 export interface Contact {

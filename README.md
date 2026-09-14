@@ -11,6 +11,7 @@ CRM WhatsApp multi-brand untuk tim travel: inbox, pipeline Kanban, aktivitas, de
 - Wizard Deal tiga langkah. Lead baru menjadi `Deal` hanya setelah booking ERP berhasil.
 - Book Seat, DP, dan Lunas memiliki substatus terpisah serta idempotency key.
 - Session Baileys terenkripsi di database, connection lock, outbox persisten, ack, reconnect backoff, dan media privat.
+- Multi-device WhatsApp per brand dengan QR, status terpisah, dan penugasan akses per CS.
 - Login/refresh ERP, pemilihan brand Super Admin, serta Socket.IO yang memakai session browser yang sama.
 - Role Admin/CS dari akun ERP: Admin mengelola akun CS, pembagian lead, dan leaderboard; CS hanya melihat lead serta percakapan yang ditugaskan.
 - Rotasi lead berbasis kuota 100 slot per brand, dengan perubahan pembagian memulai siklus baru tanpa memindahkan lead lama.

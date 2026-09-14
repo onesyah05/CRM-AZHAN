@@ -176,31 +176,27 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private setStatus(sessionId: number, status: WhatsAppStatus): void {
 	this.statuses.set(sessionId, status);
 	if (this.authDriver !== 'database' || !this.databasePool) return;
-	void this.databasePool.execute(
-	  `INSERT INTO crm_whatsapp_sessions (brand_id,phone_e164,connection_status,last_connected_at)
-	   VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE phone_e164=VALUES(phone_e164),
-	   connection_status=VALUES(connection_status),last_connected_at=COALESCE(VALUES(last_connected_at),last_connected_at)`,
-	  [sessionId, status.phone ?? null, status.status, status.lastConnectedAt ? new Date(status.lastConnectedAt) : null],
+	  void this.databasePool.execute(
+	  `UPDATE crm_whatsapp_sessions
+	      SET phone_e164=COALESCE(?, phone_e164), connection_status=?,
+	          last_connected_at=COALESCE(?, last_connected_at)
+	    WHERE id=?`,
+	  [status.phone ?? null, status.status, status.lastConnectedAt ? new Date(status.lastConnectedAt) : null, sessionId],
 	);
   }
 
   private async acquireConnectionLock(sessionId: number): Promise<void> {
 	if (this.authDriver !== 'database' || !this.databasePool) return;
-	await this.databasePool.execute(
-	  `INSERT INTO crm_whatsapp_sessions (brand_id,connection_status) VALUES (?,'disconnected')
-	   ON DUPLICATE KEY UPDATE brand_id=VALUES(brand_id)`,
-	  [sessionId],
-	);
 	const [result] = await this.databasePool.execute<ResultSetHeader>(
 	  `UPDATE crm_whatsapp_sessions SET lock_owner=?,lock_expires_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 45 SECOND)
-	   WHERE brand_id=? AND (lock_owner IS NULL OR lock_owner=? OR lock_expires_at<UTC_TIMESTAMP(3))`,
+	   WHERE id=? AND (lock_owner IS NULL OR lock_owner=? OR lock_expires_at<UTC_TIMESTAMP(3))`,
 	  [this.lockOwner, sessionId, this.lockOwner],
 	);
 	if (!result.affectedRows) throw new ConnectionLockBusyError();
 	const heartbeat = setInterval(() => {
 	  void this.databasePool?.execute(
 		`UPDATE crm_whatsapp_sessions SET lock_expires_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 45 SECOND)
-		  WHERE brand_id=? AND lock_owner=?`,
+		  WHERE id=? AND lock_owner=?`,
 		[sessionId, this.lockOwner],
 	  );
 	}, 15_000);
@@ -215,7 +211,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 	if (this.authDriver === 'database' && this.databasePool) {
 	  try {
 		await this.databasePool.execute(
-		  `UPDATE crm_whatsapp_sessions SET lock_owner=NULL,lock_expires_at=NULL WHERE brand_id=? AND lock_owner=?`,
+		  `UPDATE crm_whatsapp_sessions SET lock_owner=NULL,lock_expires_at=NULL WHERE id=? AND lock_owner=?`,
 		  [sessionId, this.lockOwner],
 		);
 	  } catch {
@@ -303,18 +299,20 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   async restoreConnections(): Promise<void> {
 	if (this.authDriver !== 'database' || !this.databasePool) return;
-	const [rows] = await this.databasePool.execute<(RowDataPacket & {
-	  brand_id: number;
+  const [rows] = await this.databasePool.execute<(RowDataPacket & {
+	 id: number;
+	 brand_id: number;
 	  connection_status: string;
 	  has_auth: number;
 	})[]>(
-	  `SELECT brand_id,connection_status,encrypted_auth_state IS NOT NULL AS has_auth
+	  `SELECT brand_id,id,connection_status,encrypted_auth_state IS NOT NULL AS has_auth
 	     FROM crm_whatsapp_sessions`,
 	);
 	for (const row of rows) {
 	  if (row.connection_status === 'logged_out' || !row.has_auth) {
 		if (row.connection_status === 'logged_out') {
-		  this.statuses.set(row.brand_id, {
+		  const sessionId = Number(row.id ?? row.brand_id);
+		  this.statuses.set(sessionId, {
 			status: 'logged_out',
 			message: 'Perangkat telah logout. Pindai QR untuk menghubungkan kembali.',
 			developmentStorage: false,
@@ -323,7 +321,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 		continue;
 	  }
 	  try {
-		await this.connect(row.brand_id);
+		await this.connect(Number(row.id ?? row.brand_id));
 	  } catch (error) {
 		this.logger?.warn({
 		  eventType: 'whatsapp_restore_failed',

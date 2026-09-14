@@ -37,15 +37,15 @@ function decrypt(value: Buffer, secret: string): StoredAuthState {
   return JSON.parse(plaintext, BufferJSON.reviver) as StoredAuthState;
 }
 
-export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: string): Promise<{
+export async function useDatabaseAuthState(pool: Pool, sessionId: number, secret: string): Promise<{
   state: AuthenticationState;
   saveCreds: () => Promise<void>;
   flush: () => Promise<void>;
   clear: () => Promise<void>;
 }> {
   const [rows] = await pool.execute<(RowDataPacket & { encrypted_auth_state: Buffer | null })[]>(
-    'SELECT encrypted_auth_state FROM crm_whatsapp_sessions WHERE brand_id=? LIMIT 1',
-    [brandId],
+    'SELECT encrypted_auth_state FROM crm_whatsapp_sessions WHERE id=? LIMIT 1',
+    [sessionId],
   );
   const stored = rows[0]?.encrypted_auth_state
     ? decrypt(rows[0].encrypted_auth_state, secret)
@@ -56,10 +56,10 @@ export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: 
     writeChain = writeChain.then(async () => {
       const encrypted = encrypt(stored, secret);
       await pool.execute(
-        `INSERT INTO crm_whatsapp_sessions (brand_id,encrypted_auth_state,connection_status)
-         VALUES (?,?,'disconnected')
-         ON DUPLICATE KEY UPDATE encrypted_auth_state=VALUES(encrypted_auth_state)`,
-        [brandId, encrypted],
+        `UPDATE crm_whatsapp_sessions
+            SET encrypted_auth_state=?
+          WHERE id=?`,
+        [encrypted, sessionId],
       );
     });
     return writeChain;
@@ -70,8 +70,8 @@ export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: 
       await pool.execute(
         `UPDATE crm_whatsapp_sessions
          SET encrypted_auth_state=NULL,phone_e164=NULL,last_connected_at=NULL
-         WHERE brand_id=?`,
-        [brandId],
+         WHERE id=?`,
+        [sessionId],
       );
     });
     return writeChain;
@@ -109,12 +109,12 @@ export async function useDatabaseAuthState(pool: Pool, brandId: number, secret: 
   return { state, saveCreds: persist, flush: () => writeChain, clear };
 }
 
-export async function clearLoggedOutDatabaseAuthState(pool: Pool, brandId: number): Promise<boolean> {
+export async function clearLoggedOutDatabaseAuthState(pool: Pool, sessionId: number): Promise<boolean> {
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE crm_whatsapp_sessions
      SET encrypted_auth_state=NULL,phone_e164=NULL,last_connected_at=NULL
-     WHERE brand_id=? AND connection_status='logged_out'`,
-    [brandId],
+     WHERE id=? AND connection_status='logged_out'`,
+    [sessionId],
   );
   return result.affectedRows > 0;
 }

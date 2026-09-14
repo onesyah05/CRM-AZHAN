@@ -16,6 +16,7 @@ import type {
   TeamPerformance,
   UserContext,
   WhatsAppStatus,
+  WhatsAppSession,
 } from '@azhan-crm/contracts';
 
 export class ApiClientError extends Error {
@@ -115,7 +116,11 @@ export const api = {
 	  return response.json() as Promise<Message>;
 	},
   whatsappStatus: () => request<WhatsAppStatus>('/api/v1/whatsapp/status'),
-  connectWhatsapp: () => request<WhatsAppStatus>('/api/v1/whatsapp/connect', { method: 'POST' }),
-  disconnectWhatsapp: (logout = false) =>
-    request<WhatsAppStatus>('/api/v1/whatsapp/disconnect', { method: 'POST', body: JSON.stringify({ logout }) }),
+  whatsappSessions: () => request<WhatsAppSession[]>('/api/v1/whatsapp/sessions'),
+  createWhatsappSession: (label: string) => request<WhatsAppSession>('/api/v1/whatsapp/sessions', { method: 'POST', body: JSON.stringify({ label }) }),
+  updateWhatsappSession: (sessionId: number, label: string) => request<WhatsAppSession>(`/api/v1/whatsapp/sessions/${sessionId}`, { method: 'PUT', body: JSON.stringify({ label }) }),
+  assignWhatsappSession: (sessionId: number, userIds: number[]) => request<WhatsAppSession>(`/api/v1/whatsapp/sessions/${sessionId}/assignments`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
+  connectWhatsapp: (sessionId?: number) => request<WhatsAppStatus>('/api/v1/whatsapp/connect', { method: 'POST', body: JSON.stringify(sessionId ? { sessionId } : {}) }),
+  disconnectWhatsapp: (logout = false, sessionId?: number) =>
+    request<WhatsAppStatus>('/api/v1/whatsapp/disconnect', { method: 'POST', body: JSON.stringify({ logout, ...(sessionId ? { sessionId } : {}) }) }),
 };

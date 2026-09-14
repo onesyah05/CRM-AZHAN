@@ -11,7 +11,7 @@ import helmet from 'helmet';
 import pino from 'pino';
 import { Server as SocketServer } from 'socket.io';
 import { z } from 'zod';
-import type { ApiErrorShape, Lead, UserContext } from '@azhan-crm/contracts';
+import type { ApiErrorShape, Lead, UserContext, WhatsAppSession } from '@azhan-crm/contracts';
 import { createDatabasePool, DealConflictError, DistributionValidationError, MySqlCrmStore, VersionConflictError, type Pool } from '@azhan-crm/database';
 import { config } from './config.js';
 import { TestFixtureStore } from './test-fixture-store.js';
@@ -177,6 +177,48 @@ function brandId(request: Request): number {
 
 function assigneeScope(request: Request): number | undefined {
   return request.session.user?.role === 'sales' ? request.session.user.id : undefined;
+}
+
+async function whatsappSessionRecords(request: Request) {
+  const currentBrandId = brandId(request);
+  if (config.testFixtures) return [{ id: currentBrandId, brandId: currentBrandId, label: 'WhatsApp Utama', isDefault: true, phone: '+62812••••778', assignedUserIds: [] }];
+  const records = await (store as MySqlCrmStore).listWhatsappSessions(currentBrandId);
+  if (request.session.user?.role !== 'sales') return records;
+  const userId = request.session.user.id;
+  return records.filter((record) => record.assignedUserIds.includes(userId));
+}
+
+async function whatsappSessionsResponse(request: Request): Promise<WhatsAppSession[]> {
+  const records = await whatsappSessionRecords(request);
+  return records.map((record) => ({
+    ...record,
+    status: whatsapp.getStatus(record.id),
+  }));
+}
+
+async function resolveWhatsappSession(request: Request, requestedSessionId?: number) {
+  const currentBrandId = brandId(request);
+  if (config.testFixtures) return { id: currentBrandId, brandId: currentBrandId, label: 'WhatsApp Utama', isDefault: true, assignedUserIds: [] };
+  const record = requestedSessionId
+    ? await (store as MySqlCrmStore).getWhatsappSession(currentBrandId, requestedSessionId)
+    : await (store as MySqlCrmStore).ensureDefaultWhatsappSession(currentBrandId);
+  return record;
+}
+
+async function canManageWhatsappSession(request: Request, sessionId: number): Promise<boolean> {
+  if (request.session.user?.role !== 'sales' || config.testFixtures) return true;
+  return (store as MySqlCrmStore).canUserManageWhatsappSession(brandId(request), sessionId, request.session.user.id);
+}
+
+const whatsappSessionBrandCache = new Map<number, number>();
+
+async function brandForWhatsappSession(sessionId: number): Promise<number | null> {
+  if (config.testFixtures) return sessionId;
+  const cached = whatsappSessionBrandCache.get(sessionId);
+  if (cached) return cached;
+  const resolved = await (store as MySqlCrmStore).getWhatsappSessionBrand(sessionId);
+  if (resolved) whatsappSessionBrandCache.set(sessionId, resolved);
+  return resolved;
 }
 
 function canAccessLead(request: Request, lead: Lead): boolean {
@@ -781,7 +823,8 @@ app.get('/api/v1/conversations', requireBrand, async (request, response) => {
   const currentBrandId = brandId(request);
   const conversations = await store.listConversations(currentBrandId, assigneeScope(request));
   response.json(conversations.map((conversation) => {
-	const presence = whatsapp.getPresence(currentBrandId, conversation.phone);
+	const sessionId = conversation.whatsappSessionId ?? currentBrandId;
+	const presence = whatsapp.getPresence(sessionId, conversation.phone);
 	return {
 	  ...conversation,
 	  ...presence,
@@ -794,7 +837,7 @@ app.get('/api/v1/conversations/:id/avatar', requireBrand, async (request, respon
   const conversation = (await store.listConversations(currentBrandId, assigneeScope(request)))
 	.find((item) => item.id === String(request.params.id));
   if (!conversation?.phoneResolved) return response.status(204).end();
-  const picture = await whatsapp.getProfilePicture(currentBrandId, conversation.phone);
+	const picture = await whatsapp.getProfilePicture(conversation.whatsappSessionId ?? currentBrandId, conversation.phone);
   if (!picture) return response.status(204).end();
   response.setHeader('Cache-Control', 'private, max-age=300');
   response.type(picture.mimeType).send(picture.data);
@@ -811,9 +854,9 @@ app.get('/api/v1/conversations/:id/messages', requireBrand, async (request, resp
   if (!messages) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
   if (transport) {
 	try {
-	  await whatsapp.subscribePresence(currentBrandId, transport.phone);
-	  if (transport.messageIds.length && whatsapp.getStatus(currentBrandId).status === 'connected') {
-		await whatsapp.markRead(currentBrandId, transport.phone, transport.messageIds);
+	  await whatsapp.subscribePresence(transport.sessionId, transport.phone);
+	  if (transport.messageIds.length && whatsapp.getStatus(transport.sessionId).status === 'connected') {
+		await whatsapp.markRead(transport.sessionId, transport.phone, transport.messageIds);
 		await (store as MySqlCrmStore).markInboundMessagesRead(currentBrandId, conversationId, transport.messageIds);
 	  }
 	} catch (error) {
@@ -835,7 +878,9 @@ app.post('/api/v1/conversations/:id/presence', requireBrand, mutationLimiter, as
 	.find((item) => item.id === String(request.params.id));
   if (!conversation) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
   try {
-	await whatsapp.sendPresence(currentBrandId, conversation.phone, parsed.data.presence);
+	const transport = config.testFixtures ? null : await (store as MySqlCrmStore).getConversationTransportContext(currentBrandId, conversation.id);
+	if (!config.testFixtures && (!transport || !(await canManageWhatsappSession(request, transport.sessionId)))) return sendError(response, 403, 'WHATSAPP_SESSION_FORBIDDEN', 'Anda tidak ditugaskan untuk perangkat WhatsApp ini.');
+	await whatsapp.sendPresence(transport?.sessionId ?? currentBrandId, conversation.phone, parsed.data.presence);
 	response.status(204).end();
   } catch (error) {
 	sendError(response, 503, 'WHATSAPP_PRESENCE_FAILED', error instanceof Error ? error.message : 'Status mengetik belum terkirim.', true);
@@ -851,6 +896,7 @@ app.post('/api/v1/conversations/:id/messages', requireBrand, mutationLimiter, as
 	if (!config.testFixtures) {
 	  const transport = await (store as MySqlCrmStore).getConversationTransportContext(brandId(request), conversation.id);
 	  if (!transport) return sendError(response, 409, 'WHATSAPP_IDENTITY_SYNCING', 'Nomor WhatsApp kontak masih disinkronkan. Hubungkan ulang WhatsApp lalu tunggu histori selesai.');
+	  if (!(await canManageWhatsappSession(request, transport.sessionId))) return sendError(response, 403, 'WHATSAPP_SESSION_FORBIDDEN', 'Anda tidak ditugaskan untuk perangkat WhatsApp ini.');
 	  const message = await (store as MySqlCrmStore).enqueueOutboundMessage(
 		brandId(request), conversation.id, parsed.data.body,
 	  );
@@ -877,6 +923,7 @@ app.post(
 	if (!(await canAccessConversation(request, String(request.params.id)))) return sendError(response, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
 	const transport = await (store as MySqlCrmStore).getConversationTransportContext(brandId(request), String(request.params.id));
 	if (!transport) return sendError(response, 409, 'WHATSAPP_IDENTITY_SYNCING', 'Nomor WhatsApp kontak masih disinkronkan. Hubungkan ulang WhatsApp lalu tunggu histori selesai.');
+	if (!(await canManageWhatsappSession(request, transport.sessionId))) return sendError(response, 403, 'WHATSAPP_SESSION_FORBIDDEN', 'Anda tidak ditugaskan untuk perangkat WhatsApp ini.');
 	if (!Buffer.isBuffer(request.body) || !request.body.length) return sendError(response, 400, 'MEDIA_REQUIRED', 'Pilih file untuk dikirim.');
 	const rawFileName = request.header('x-file-name') ?? 'lampiran';
 	let decodedFileName: string;
@@ -950,7 +997,7 @@ async function processOutboundQueue() {
 	const persistentStore = store as MySqlCrmStore;
 	const jobs = await persistentStore.claimOutboundJobs(outboxWorkerId, 10);
 	for (const job of jobs) {
-	  if (whatsapp.getStatus(job.brandId).status !== 'connected') {
+	  if (whatsapp.getStatus(job.sessionId).status !== 'connected') {
 		await persistentStore.deferOutboundJob(job.id);
 		continue;
 	  }
@@ -960,14 +1007,14 @@ async function processOutboundQueue() {
 		  const mediaPath = job.payload.mediaObjectKey ? resolveMediaPath(job.payload.mediaObjectKey) : null;
 		  if (!mediaPath) throw new Error('File lampiran tidak ditemukan.');
 		  sent = await whatsapp.sendMedia({
-			sessionId: job.brandId, phone: job.payload.phone, type: job.payload.type,
+			sessionId: job.sessionId, phone: job.payload.phone, type: job.payload.type,
 			data: await readFile(mediaPath), mimeType: job.payload.mimeType ?? 'application/octet-stream',
 			fileName: job.payload.fileName ?? 'lampiran', caption: job.payload.body,
 			messageId: job.payload.messageId,
 		  });
 		} else {
 		  sent = await whatsapp.sendText({
-			sessionId: job.brandId, phone: job.payload.phone, text: job.payload.body,
+			sessionId: job.sessionId, phone: job.payload.phone, text: job.payload.body,
 			messageId: job.payload.messageId,
 		  });
 		}
@@ -991,23 +1038,71 @@ async function processOutboundQueue() {
   }
 }
 
-app.get('/api/v1/whatsapp/status', requireBrand, (request, response) => response.json(whatsapp.getStatus(brandId(request))));
+app.get('/api/v1/whatsapp/sessions', requireBrand, async (request, response) => {
+  response.json(await whatsappSessionsResponse(request));
+});
+app.get('/api/v1/whatsapp/status', requireBrand, async (request, response) => {
+  const records = await whatsappSessionRecords(request);
+  const selected = records.find((record) => record.isDefault) ?? records[0];
+  response.json(selected ? whatsapp.getStatus(selected.id) : {
+    status: 'disconnected', message: 'Belum ada perangkat WhatsApp yang ditambahkan.', developmentStorage: config.waAuthDriver === 'filesystem',
+  });
+});
+app.post('/api/v1/whatsapp/sessions', requireBrand, requireManager, mutationLimiter, async (request, response) => {
+  const parsed = z.object({ label: z.string().trim().min(2).max(120) }).safeParse(request.body);
+  if (!parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Nama perangkat minimal 2 karakter.');
+  if (config.testFixtures) return sendError(response, 409, 'TEST_READ_ONLY', 'Penambahan perangkat tidak tersedia pada fixture pengujian.');
+  const session = await (store as MySqlCrmStore).createWhatsappSession(brandId(request), parsed.data.label);
+  response.status(201).json({ ...session, status: whatsapp.getStatus(session.id) } satisfies WhatsAppSession);
+});
+app.put('/api/v1/whatsapp/sessions/:id', requireBrand, requireManager, mutationLimiter, async (request, response) => {
+  const params = z.object({ id: z.coerce.number().int().positive() }).safeParse(request.params);
+  const parsed = z.object({ label: z.string().trim().min(2).max(120) }).safeParse(request.body);
+  if (!params.success || !parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Nama perangkat belum valid.');
+  if (config.testFixtures) return sendError(response, 409, 'TEST_READ_ONLY', 'Pengaturan perangkat tidak tersedia pada fixture pengujian.');
+  const session = await (store as MySqlCrmStore).updateWhatsappSessionLabel(brandId(request), params.data.id, parsed.data.label);
+  if (!session) return sendError(response, 404, 'WHATSAPP_SESSION_NOT_FOUND', 'Perangkat WhatsApp tidak ditemukan.');
+  response.json({ ...session, status: whatsapp.getStatus(session.id) } satisfies WhatsAppSession);
+});
+app.put('/api/v1/whatsapp/sessions/:id/assignments', requireBrand, requireManager, mutationLimiter, async (request, response) => {
+  const params = z.object({ id: z.coerce.number().int().positive() }).safeParse(request.params);
+  const parsed = z.object({ userIds: z.array(z.number().int().positive()).max(100) }).safeParse(request.body);
+  if (!params.success || !parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Daftar user belum valid.');
+  if (config.testFixtures) return sendError(response, 409, 'TEST_READ_ONLY', 'Penugasan perangkat tidak tersedia pada fixture pengujian.');
+  try {
+    const session = await (store as MySqlCrmStore).setWhatsappSessionAssignments(brandId(request), params.data.id, parsed.data.userIds);
+    if (!session) return sendError(response, 404, 'WHATSAPP_SESSION_NOT_FOUND', 'Perangkat WhatsApp tidak ditemukan.');
+    response.json({ ...session, status: whatsapp.getStatus(session.id) } satisfies WhatsAppSession);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'WHATSAPP_ASSIGNMENT_USER_INVALID') return sendError(response, 400, 'WHATSAPP_ASSIGNMENT_USER_INVALID', 'User yang dipilih tidak aktif di brand ini.');
+    throw error;
+  }
+});
 app.post('/api/v1/whatsapp/connect', requireBrand, requireManager, mutationLimiter, async (request, response) => {
-  await whatsapp.connect(brandId(request));
-  response.status(202).json(whatsapp.getStatus(brandId(request)));
+  const parsed = z.object({ sessionId: z.number().int().positive().optional() }).safeParse(request.body ?? {});
+  if (!parsed.success) return sendError(response, 400, 'VALIDATION_ERROR', 'Perangkat WhatsApp belum valid.');
+  const session = await resolveWhatsappSession(request, parsed.data.sessionId);
+  if (!session) return sendError(response, 404, 'WHATSAPP_SESSION_NOT_FOUND', 'Perangkat WhatsApp tidak ditemukan.');
+  await whatsapp.connect(session.id);
+  response.status(202).json(whatsapp.getStatus(session.id));
 });
 app.post('/api/v1/whatsapp/disconnect', requireBrand, requireManager, mutationLimiter, async (request, response) => {
-  const parsed = z.object({ logout: z.boolean().default(false) }).parse(request.body ?? {});
-  await whatsapp.disconnect(brandId(request), parsed.logout);
-  response.json(whatsapp.getStatus(brandId(request)));
+  const parsed = z.object({ logout: z.boolean().default(false), sessionId: z.number().int().positive().optional() }).parse(request.body ?? {});
+  const session = await resolveWhatsappSession(request, parsed.sessionId);
+  if (!session) return sendError(response, 404, 'WHATSAPP_SESSION_NOT_FOUND', 'Perangkat WhatsApp tidak ditemukan.');
+  await whatsapp.disconnect(session.id, parsed.logout);
+  response.json(whatsapp.getStatus(session.id));
 });
 
 whatsapp.onIncoming(async (incoming) => {
+	const incomingBrandId = await brandForWhatsappSession(incoming.sessionId);
+	if (!incomingBrandId) return;
 	const mediaObjectKey = incoming.media
-	  ? await persistIncomingMedia(incoming.sessionId, incoming.media)
+	  ? await persistIncomingMedia(incomingBrandId, incoming.media)
 	  : undefined;
   const created = await store.ingestIncoming({
-    brandId: incoming.sessionId,
+	  brandId: incomingBrandId,
+	  sessionId: incoming.sessionId,
     messageId: incoming.messageId,
     jid: incoming.jid,
     phone: incoming.phone,
@@ -1018,29 +1113,35 @@ whatsapp.onIncoming(async (incoming) => {
 	...(mediaObjectKey ? { mediaObjectKey } : {}),
 	...(incoming.media ? { mediaMimeType: incoming.media.mimeType, mediaFileName: incoming.media.fileName } : {}),
   });
-  io.to(`brand:${incoming.sessionId}`).emit('message.created', created);
+  io.to(`brand:${incomingBrandId}`).emit('message.created', created);
 });
 
 whatsapp.onContacts(async (contacts) => {
   if (config.testFixtures || !contacts.length) return;
   const sessionId = contacts[0]!.sessionId;
+	const contactsBrandId = await brandForWhatsappSession(sessionId);
+	if (!contactsBrandId) return;
   await (store as MySqlCrmStore).syncWhatsappContacts(
-    sessionId,
+	  contactsBrandId,
     contacts.map(({ name, phone, jid, aliases }) => ({ name, phone, jid, aliases })),
+	  sessionId,
   );
-  io.to(`brand:${sessionId}`).emit('contacts.synced', { imported: contacts.length });
+  io.to(`brand:${contactsBrandId}`).emit('contacts.synced', { imported: contacts.length });
 });
 
 whatsapp.onHistory(async (messages) => {
   if (config.testFixtures || !messages.length) return;
+	const historyBrandId = await brandForWhatsappSession(messages[0]!.sessionId);
+	if (!historyBrandId) return;
   let imported = 0;
   for (const historical of messages) {
 	try {
 	  const mediaObjectKey = historical.media
-		? await persistIncomingMedia(historical.sessionId, historical.media)
+		? await persistIncomingMedia(historyBrandId, historical.media)
 		: undefined;
 	  await (store as MySqlCrmStore).ingestIncoming({
-		brandId: historical.sessionId,
+		brandId: historyBrandId,
+		sessionId: historical.sessionId,
 		messageId: historical.messageId,
 		jid: historical.jid,
 		phone: historical.phone,
@@ -1058,28 +1159,32 @@ whatsapp.onHistory(async (messages) => {
 	} catch (error) {
 	  logger.warn({
 		eventType: 'whatsapp_history_message_import_failed',
-		brandId: historical.sessionId,
+		brandId: historyBrandId,
 		errorName: error instanceof Error ? error.name : 'UnknownError',
 	  }, 'A WhatsApp history message could not be imported');
 	}
   }
-  const sessionId = messages[0]!.sessionId;
-  io.to(`brand:${sessionId}`).emit('history.synced', { imported });
-  logger.info({ eventType: 'whatsapp_history_synced', brandId: sessionId, imported }, 'WhatsApp history chunk imported');
+  io.to(`brand:${historyBrandId}`).emit('history.synced', { imported });
+  logger.info({ eventType: 'whatsapp_history_synced', brandId: historyBrandId, sessionId: messages[0]!.sessionId, imported }, 'WhatsApp history chunk imported');
 });
 
 whatsapp.onStatus(async (update) => {
   if (config.testFixtures) return;
-  const message = await (store as MySqlCrmStore).updateMessageStatus(update.sessionId, update.messageId, update.status);
-  if (message) io.to(`brand:${update.sessionId}`).emit('message.status.updated', message);
+	const statusBrandId = await brandForWhatsappSession(update.sessionId);
+	if (!statusBrandId) return;
+	const message = await (store as MySqlCrmStore).updateMessageStatus(statusBrandId, update.messageId, update.status, update.sessionId);
+	if (message) io.to(`brand:${statusBrandId}`).emit('message.status.updated', message);
 });
 
 whatsapp.onPresence((update) => {
-  io.to(`brand:${update.sessionId}`).emit('presence.updated', {
+	void brandForWhatsappSession(update.sessionId).then((presenceBrandId) => {
+	if (!presenceBrandId) return;
+	io.to(`brand:${presenceBrandId}`).emit('presence.updated', {
 	phone: update.phone,
 	presence: update.presence,
 	...(update.lastSeenAt ? { lastSeenAt: update.lastSeenAt } : {}),
   });
+	});
 });
 
 if (!config.testFixtures && config.nodeEnv !== 'test') {

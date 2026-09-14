@@ -68,7 +68,7 @@ Membantu setiap tim travel Azhan mengubah percakapan WhatsApp menjadi keberangka
 
 - Login menggunakan akun admin ERP Azhan.
 - Pemilihan brand untuk Super Admin dan scope otomatis untuk admin Travel.
-- Koneksi satu akun WhatsApp aktif per brand melalui QR code Baileys.
+- Koneksi beberapa akun WhatsApp aktif per brand melalui QR code Baileys, dengan penugasan akses per CS.
 - Status koneksi WhatsApp dan mekanisme reconnect.
 - Inbox conversation dengan pencarian, filter, unread count, dan assignment PIC.
 - Pengiriman dan penerimaan pesan teks serta gambar/dokumen dasar.
@@ -92,7 +92,7 @@ Membantu setiap tim travel Azhan mengubah percakapan WhatsApp menjadi keberangka
 - Komisi sales, invoice, pembayaran, dokumen keberangkatan, atau operasional setelah booking; fungsi tersebut tetap dikelola ERP.
 - Penggantian Master Dashboard atau Travel Dashboard.
 - Aplikasi mobile native.
-- Multi-account WhatsApp dalam satu brand. Kemampuan ini dapat masuk fase berikutnya.
+- Broadcast massal dan otomasi spam tetap tidak disediakan.
 
 ---
 
@@ -682,7 +682,7 @@ Setiap layar utama harus memiliki:
 
 ### 13.4 Skalabilitas
 
-- Satu logical socket per sesi WhatsApp; ownership worker harus tunggal untuk mencegah koneksi ganda.
+- Setiap nomor memiliki satu logical socket; ownership worker harus tunggal untuk mencegah koneksi ganda.
 - Socket/presence dan event real-time harus dapat dipisah dari API server.
 - Gunakan queue untuk media, retry, dan Deal jika volume meningkat.
 - Desain tabel dan event wajib mendukung lebih dari satu brand sejak awal.
@@ -845,13 +845,13 @@ Metrik turunan:
 
 Pertanyaan ini tidak menghalangi pembuatan prototype, tetapi harus diputuskan sebelum production rollout:
 
-1. Apakah satu brand hanya memiliki satu nomor WhatsApp atau memerlukan beberapa nomor/cabang?
+1. Apakah setiap brand memerlukan batas jumlah nomor atau aturan nomor per cabang?
 2. Apakah satu Deal dapat membuat booking untuk beberapa jamaah/pax sekaligus?
 3. Berapa lama isi pesan dan media disimpan?
 4. Apakah read receipt dan presence/online perlu dikirim ke WhatsApp?
 5. URL final untuk deep link Master Dashboard dan Travel Dashboard.
 
-Keputusan MVP: satu nomor per brand; Admin CRM melihat semua lead pada brand dan CS hanya melihat assignment miliknya; akun/auth, brand, jamaah, jadwal, booking, dan pembayaran tetap bersumber dari ERP; data operasional CRM memakai database terpisah dengan tabel berprefix `crm_`; konversi memakai endpoint ERP atomik `POST /api/admin/crm/deals`.
+Keputusan implementasi: setiap brand dapat memiliki beberapa nomor WhatsApp; Admin CRM melihat dan mengelola seluruh perangkat pada brand, lalu dapat menugaskan perangkat tertentu ke CS. CS hanya melihat percakapan dari perangkat yang ditugaskan kepadanya atau lead yang memang ditugaskan kepadanya. Akun/auth, brand, jamaah, jadwal, booking, dan pembayaran tetap bersumber dari ERP; data operasional CRM memakai database terpisah dengan tabel berprefix `crm_`; konversi memakai endpoint ERP atomik `POST /api/admin/crm/deals`.
 
 Asumsi yang masih sementara: satu booking utama per lead, retention belum otomatis, dan read receipt nonaktif.
 
